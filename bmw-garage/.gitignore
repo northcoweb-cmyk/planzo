@@ -1,0 +1,6 @@
+node_modules
+dist
+dev-dist
+*.log
+.e2e-out
+public/hero/*.png

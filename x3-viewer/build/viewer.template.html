@@ -56,6 +56,9 @@ button.icon{width:38px;padding:0;display:grid;place-items:center}
   letter-spacing:1.4px;font-size:12px;text-transform:uppercase;transition:opacity .5s;text-align:center;padding:30px}
 #loader.gone{opacity:0;pointer-events:none}
 #fatal{display:none;letter-spacing:0;text-transform:none;font-size:15px;color:var(--ink)}
+html.embed,html.embed body{background:transparent}
+html.embed #stage{background:none}
+html.embed .hud,html.embed #loader,html.embed #fatal{display:none !important}
 @media (max-width:420px){#title h1{font-size:15px}}
 @media (orientation:landscape) and (max-height:480px){
   #specs{bottom:calc(8px + var(--sab));left:auto;right:calc(14px + var(--sar))}
@@ -246,6 +249,10 @@ var VERT_STD = [
 /* ------------------------------------------------------------------ *
  *  Boot                                                               *
  * ------------------------------------------------------------------ */
+var QS = location.search;
+var EMBED = /[?&]embed=1/.test(QS);
+var DZ = parseFloat((/[?&]dz=([\d.]+)/.exec(QS)||[])[1]) || 1;   // camera distance multiplier (host/poster framing)
+if (EMBED) document.documentElement.classList.add('embed');
 var canvas = document.getElementById('c');
 var renderer;
 try {
@@ -596,6 +603,7 @@ GLSL_ENV,
   setTimeout(function(){ document.getElementById('loader').style.display='none'; }, 700);
   resize(); wake();
   requestAnimationFrame(frame);
+  notifyReady();
 }
 
 /* ------------------------------------------------------------------ *
@@ -607,7 +615,7 @@ var st = {yaw:HOME.yaw, pitch:HOME.pitch, dist:HOME.dist, tx:HOME.tx, ty:HOME.ty
 var vel = {yaw:0, pitch:0};
 var zoomVel = 0;
 var pointers = new Map();
-var lastMoveT = 0, pinch0 = 0, pinchDist0 = 0, lastT = 0, auto = true, autoSpeed = 0.18, idleSince = 0;
+var lastMoveT = 0, pinch0 = 0, pinchDist0 = 0, lastT = 0, auto = !/[?&]auto=0/.test(QS), autoSpeed = 0.18, idleSince = 0;
 var tween = null, dirty = true, fitDist = 7.4, maxDist = 18;
 // orbiting the car centre must stay outside the body; close-up targets (details) may go much closer
 function curMin(){ return Math.hypot(st.tx-HOME.tx, st.ty-HOME.ty, st.tz-HOME.tz) > 0.4 ? 0.7 : 2.6; }
@@ -628,7 +636,7 @@ function resize(){
   var hf = 2*Math.atan(Math.tan(vf/2)*camera.aspect);
   // fit the 4.45 m x 1.7 m car (plus depth for perspective) into the viewport
   fitDist = Math.max(2.45/Math.tan(hf/2), 1.15/Math.tan(vf/2)) + 1.1;
-  HOME.dist = fitDist*0.9;
+  HOME.dist = fitDist*0.9*DZ;
   if (!resize.done){ resize.done = true; st.dist = HOME.dist; }
   maxDist = fitDist*2.0;
   st.dist = Math.min(maxDist, Math.max(curMin(), st.dist));
@@ -796,6 +804,29 @@ document.getElementById('bSpec').addEventListener('click', function(){
 var hintEl=document.getElementById('hint'), hintGone=false;
 function hideHint(){ if(!hintGone){ hintGone=true; hintEl.classList.add('gone'); } }
 setTimeout(hideHint, 9000);
+
+/* ---------------- host API (used when embedded in the BMW Garage app) ----------------
+   parent -> viewer: {t:'x3', cmd:'view'|'detail', arg:'Front'} | {cmd:'reset'} | {cmd:'auto', arg:bool} | {cmd:'plate', arg:bool}
+   viewer -> parent: {t:'x3', evt:'ready'} once the scene is built                                          */
+function flyNamed(list, name){
+  for (var i=0;i<list.length;i++) if (list[i][0]===name){
+    var t=Object.assign({},list[i][1]); if (t.dist==null) t.dist=fitDist; else if (t.dist==='home') t.dist=HOME.dist;
+    flyTo(t,1000); return true;
+  }
+  return false;
+}
+window.addEventListener('message', function(e){
+  var d=e.data; if (!d || d.t!=='x3') return;
+  if (d.cmd==='view') flyNamed(VIEWS,d.arg);
+  else if (d.cmd==='detail') flyNamed(DETAILS,d.arg);
+  else if (d.cmd==='reset') flyTo(Object.assign({},HOME),900);
+  else if (d.cmd==='auto'){ auto=!!d.arg; tween=null; idleSince=performance.now(); setAutoBtn(); wake(); }
+  else if (d.cmd==='plate'){
+    var bp=document.getElementById('bPlate');
+    if (bp && (bp.getAttribute('aria-pressed')==='true') !== !!d.arg) bp.click();
+  }
+});
+function notifyReady(){ try{ window.parent!==window && window.parent.postMessage({t:'x3',evt:'ready'},'*'); }catch(_){} }
 
 /* ---------------- render loop ---------------- */
 var frames=0, slow=0, tAcc=0;
