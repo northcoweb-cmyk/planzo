@@ -1,0 +1,852 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="theme-color" content="#18191b">
+<title>BMW X3 xDrive35i 3D Viewer</title>
+<style>
+:root{
+  --bg0:#2a2b2e; --bg1:#17181a; --ink:#ececee; --mute:#9a9ba1; --line:rgba(255,255,255,.12);
+  --chip:rgba(30,31,34,.72); --chip-on:#e9e9ec; --chip-on-ink:#111;
+  --sat:env(safe-area-inset-top,0px); --sab:env(safe-area-inset-bottom,0px);
+  --sal:env(safe-area-inset-left,0px); --sar:env(safe-area-inset-right,0px);
+}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;height:100%;overflow:hidden;overscroll-behavior:none;background:var(--bg1);
+  color:var(--ink);font:14px/1.35 -apple-system,BlinkMacSystemFont,"SF Pro Text","Segoe UI",Roboto,sans-serif;
+  -webkit-user-select:none;user-select:none;-webkit-touch-callout:none;-webkit-text-size-adjust:100%}
+#stage{position:fixed;inset:0;height:100vh;height:100dvh;
+  background:radial-gradient(120% 90% at 50% 38%,var(--bg0) 0%,#202124 45%,var(--bg1) 100%)}
+canvas{display:block;width:100%;height:100%;touch-action:none;outline:none;cursor:grab}
+canvas.drag{cursor:grabbing}
+.hud{position:fixed;pointer-events:none;z-index:2}
+.hud *{pointer-events:auto}
+#title{top:calc(14px + var(--sat));left:calc(16px + var(--sal));pointer-events:none}
+#title h1{margin:0;font-size:17px;font-weight:650;letter-spacing:.2px}
+#title p{margin:2px 0 0;color:var(--mute);font-size:12px;letter-spacing:.6px;text-transform:uppercase}
+#tools{top:calc(12px + var(--sat));right:calc(12px + var(--sar));display:flex;gap:8px}
+button{font:inherit;color:var(--ink);background:var(--chip);border:1px solid var(--line);
+  -webkit-backdrop-filter:blur(14px);backdrop-filter:blur(14px);border-radius:999px;
+  padding:9px 14px;min-height:38px;cursor:pointer;white-space:nowrap;touch-action:manipulation}
+button:active{transform:scale(.97)}
+button[aria-pressed=true]{background:var(--chip-on);color:var(--chip-on-ink);border-color:transparent}
+button.icon{width:38px;padding:0;display:grid;place-items:center}
+#dock{left:0;right:0;bottom:0;padding:0 0 calc(10px + var(--sab));display:flex;flex-direction:column;gap:8px}
+.row{display:flex;gap:8px;overflow-x:auto;padding:0 calc(14px + var(--sar)) 2px calc(14px + var(--sal));
+  scrollbar-width:none;-webkit-overflow-scrolling:touch;scroll-snap-type:x proximity}
+.row::-webkit-scrollbar{display:none}
+.row button{flex:0 0 auto;scroll-snap-align:start;font-size:13px}
+.row .lbl{flex:0 0 auto;align-self:center;color:var(--mute);font-size:11px;letter-spacing:.8px;text-transform:uppercase;padding-right:2px}
+#specs{left:calc(14px + var(--sal));bottom:calc(112px + var(--sab));width:min(300px,calc(100vw - 28px - var(--sal) - var(--sar)));
+  background:rgba(24,25,28,.82);-webkit-backdrop-filter:blur(18px);backdrop-filter:blur(18px);
+  border:1px solid var(--line);border-radius:16px;padding:12px 14px;display:none}
+#specs.open{display:block}
+#specs dl{margin:0;display:grid;grid-template-columns:auto 1fr;gap:6px 14px;font-size:13px}
+#specs dt{color:var(--mute);font-size:11px;letter-spacing:.8px;text-transform:uppercase;padding-top:1px}
+#specs dd{margin:0}
+#hint{left:50%;top:calc(50% + 28vmin);transform:translateX(-50%);pointer-events:none;color:var(--mute);
+  font-size:12px;letter-spacing:.5px;background:var(--chip);border:1px solid var(--line);padding:7px 13px;border-radius:999px;
+  transition:opacity .6s;white-space:nowrap}
+#hint.gone{opacity:0}
+#loader,#fatal{position:fixed;inset:0;z-index:5;display:grid;place-items:center;background:var(--bg1);color:var(--mute);
+  letter-spacing:1.4px;font-size:12px;text-transform:uppercase;transition:opacity .5s;text-align:center;padding:30px}
+#loader.gone{opacity:0;pointer-events:none}
+#fatal{display:none;letter-spacing:0;text-transform:none;font-size:15px;color:var(--ink)}
+@media (max-width:420px){#title h1{font-size:15px}}
+@media (orientation:landscape) and (max-height:480px){
+  #specs{bottom:calc(8px + var(--sab));left:auto;right:calc(14px + var(--sar))}
+  #hint{display:none}
+}
+</style>
+</head>
+<body>
+<div id="stage"><canvas id="c" tabindex="0" aria-label="Interactive 3D BMW X3. Drag to rotate, pinch to zoom."></canvas></div>
+
+<div class="hud" id="title">
+  <h1>2017 BMW X3 xDrive35i</h1>
+  <p>F25 LCI · Black Sapphire</p>
+</div>
+
+<div class="hud" id="tools">
+  <button id="bSpec" aria-pressed="false">Specs</button>
+  <button id="bReset" class="icon" aria-label="Reset view" title="Reset view">
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v5h5"/></svg>
+  </button>
+</div>
+
+<div class="hud" id="specs" role="dialog" aria-label="Vehicle specifications">
+  <dl>
+    <dt>Engine</dt><dd>3.0L N55 I6 (single turbo)</dd>
+    <dt>Drive</dt><dd>xDrive (AWD)</dd>
+    <dt>Trans</dt><dd>8-speed automatic</dd>
+    <dt>Power</dt><dd>300 hp (stock)</dd>
+    <dt>Color</dt><dd>Black Sapphire Metallic (475)</dd>
+  </dl>
+</div>
+
+<div class="hud" id="hint">Drag to orbit · Pinch to zoom</div>
+
+<div class="hud" id="dock">
+  <div class="row" id="rowDetail"></div>
+  <div class="row" id="rowView"></div>
+</div>
+
+<noscript><div id="fatal" style="display:grid">This viewer needs JavaScript.</div></noscript>
+<div id="loader">Loading X3…</div>
+<div id="fatal"><div>This viewer needs WebGL, which isn’t available in this browser.<br><span style="color:var(--mute)">Try Safari on iOS 15+ or a current desktop browser.</span></div></div>
+
+<script>/*__THREE__*/</script>
+<script>
+(function(){
+'use strict';
+
+/* ------------------------------------------------------------------ *
+ *  Embedded photo textures (cut from the supplied 4-view reference).  *
+ * ------------------------------------------------------------------ */
+var TEX = {
+  left:   '__TEX_LEFT__',
+  right:  '__TEX_RIGHT__',
+  front:  '__TEX_FRONT__',
+  rear:   '__TEX_REAR__',
+  rearPriv:'__TEX_REAR_PRIVATE__',
+  wheel:  '__TEX_WHEEL__'
+};
+
+/* ------------------------------------------------------------------ *
+ *  Photo calibration. All numbers are measured on the reference sheet *
+ *  (local pixel coords of each panel) so projection lands on the      *
+ *  photographed pixels. World: x forward, y up, z to the car's right. *
+ * ------------------------------------------------------------------ */
+var CAL = {
+  L:{w:768,h:334,mid:366.25,s:158.5,ground:306.6},          // left view  (front at image left)
+  R:{w:768,h:334,mid:385.25,s:159.6,ground:306.0},          // right view (front at image right)
+  F:{w:768,h:475,cx:407,sh:261,sv:241.8,ground:449},       // front view (car-right at image left)
+  B:{w:768,h:475,cx:363.5,sh:268.5,sv:250,ground:457.5}    // rear view  (car-right at image right)
+};
+function f(n){ return Number(n).toFixed(4); }   // GLSL needs float literals
+var WHEEL_X = 1.405, TYRE_R = 0.37, TYRE_W = 0.235, WHEEL_OUT = 0.89;
+
+/* Left-view silhouette, traced on the photo (coordinates are the 2x
+   zoomed measuring crop; /2 gives panel pixels). */
+function wx(dx){ return -((dx/2) - CAL.L.mid)/CAL.L.s; }
+function wy(dy){ return (CAL.L.ground - dy/2)/CAL.L.s; }
+function tbl(a){ return a.map(function(p){ return [wx(p[0]), wy(p[1])]; }).sort(function(a,b){return a[0]-b[0];}); }
+
+var TOP = tbl([
+ [52,430],[54,385],[60,345],[70,320],[82,307],[120,289],[170,272],[230,256],[300,244],[380,236],[440,233],[492,232],
+ [530,209],[580,172],[630,138],[680,108],[715,93],[760,84],[830,78],[900,75],[980,76],[1060,80],[1140,85],[1200,90],[1250,99],
+ [1285,111],[1315,130],[1350,158],[1385,195],[1418,226],[1435,243],
+ [1440,262],[1443,330],[1450,390],[1455,425]]);
+var BOT = tbl([
+ [52,430],[53,470],[58,500],[66,508],[110,512],[180,518],[300,524],[500,527],[800,527],[1000,527],[1200,525],
+ [1330,520],[1400,512],[1425,500],[1442,480],[1452,455],[1455,425]]);
+var BELT = tbl([[492,232],[540,250],[600,256],[700,257],[900,251],[1100,241],[1250,233],[1330,232],[1435,243]]);
+
+var X_FRONT = TOP[TOP.length-1][0], X_REAR = TOP[0][0];
+var X_COWL = wx(492);  // windshield base
+var X_HEAD = wx(715);  // windshield header
+var X_ROOFEND = wx(1285);
+
+function interp(t, x){
+  if (x <= t[0][0]) return t[0][1];
+  if (x >= t[t.length-1][0]) return t[t.length-1][1];
+  var lo=0, hi=t.length-1;
+  while (hi-lo>1){ var m=(lo+hi)>>1; if (t[m][0] > x) hi=m; else lo=m; }
+  var k=(x-t[lo][0])/(t[hi][0]-t[lo][0]);
+  return t[lo][1]*(1-k)+t[hi][1]*k;
+}
+function ss(a,b,x){ var t=Math.min(1,Math.max(0,(x-a)/(b-a))); return t*t*(3-2*t); }
+function lerp(a,b,t){ return a+(b-a)*t; }
+
+/* half-width keyframes: [x, value] (world metres, from front/rear photos) */
+var HW_LOW  = [[-2.28,.86],[-1.9,.925],[-1.5,.945],[-.9,.93],[0,.925],[.9,.935],[1.5,.94],[1.9,.90],[2.15,.84]]
+  .sort(function(a,b){return a[0]-b[0];});
+var HW_ROOF = [[-2.0,.53],[-1.6,.56],[-1.0,.575],[0,.55],[.1,.50],[.6,.48],[1.1,.55]];
+HW_ROOF.sort(function(a,b){return a[0]-b[0];});
+
+function endTaper(x){
+  var rf = 0.42, rr = 0.36;
+  var d = Math.min((X_FRONT-x)/rf, (x-X_REAR)/rr);
+  d = Math.min(1, Math.max(0, d));
+  var p = 2.6;
+  return Math.pow(1 - Math.pow(1-d, p), 1/p);
+}
+
+/* One cross-section: array of [z,y] from bottom-centre up to top-centre (right half). */
+var HALF = 14;
+function section(x){
+  var yt = interp(TOP,x), yb = Math.min(interp(BOT,x), yt-0.01);
+  var ys = x > X_COWL ? yt : Math.min(interp(BELT,x), yt);
+  var hwL = interp(HW_LOW,x);
+  var hwS = hwL*0.945;
+  var gh = Math.max(0, yt-ys);
+  var g = ss(0.0, 0.07, gh);
+  var hwR = interp(HW_ROOF,x);
+  var hwT = lerp(hwS*0.97, hwR, ss(0.0, 0.34, gh));
+  var P = new Array(HALF);
+  var q = Math.min(1, (yt-yb)/0.5);                 // thin end sections: shrink fixed offsets so the ring cannot fold
+  var ym = yb + 0.28*(ys-yb);
+  P[0]=[0,yb];
+  P[1]=[hwL*0.55,yb];
+  P[2]=[hwL*0.80,yb+0.010*q];
+  P[3]=[hwL*0.93,yb+0.045*q];
+  P[4]=[hwL*0.985,yb+0.12*q];
+  P[5]=[hwL,ym];
+  P[6]=[hwL*0.995,yb+0.55*(ys-yb)];
+  // hood/deck mode
+  var H=[ [hwS,ys-0.05*q],[hwS*0.93,ys-0.028*q],[hwS*0.78,ys-0.014*q],[hwS*0.6,ys-0.007*q],[hwS*0.4,ys-0.003*q],[hwS*0.2,ys-0.001*q],[0,ys] ];
+  // greenhouse mode
+  function L(t){ return lerp(hwS,hwT,t); }
+  var G=[ [hwS,ys-0.01],[L(.25),ys+.25*gh],[L(.6),ys+.6*gh],[L(.9),ys+.9*gh],[hwT,Math.max(ys+.95*gh,yt-0.03)],[hwT*0.7,yt-0.008],[0,yt] ];
+  for (var i=0;i<7;i++) P[7+i] = [lerp(H[i][0],G[i][0],g), lerp(H[i][1],G[i][1],g)];
+  var f = endTaper(x);
+  for (var j=0;j<HALF;j++) P[j][0]*=f;
+  P.gh = gh; P.g = g;
+  return P;
+}
+
+/* ------------------------------------------------------------------ *
+ *  GLSL helpers                                                       *
+ * ------------------------------------------------------------------ */
+var GLSL_ENV = [
+'vec3 envC(vec3 d){',
+'  float h=d.y;',
+'  vec3 sky=mix(vec3(0.045,0.05,0.06),vec3(0.20,0.22,0.26),smoothstep(-0.05,0.95,h));',
+'  vec3 col=mix(vec3(0.018,0.019,0.022),sky,smoothstep(-0.45,0.22,h));',
+'  float a=atan(d.z,d.x);',
+'  float box=smoothstep(0.50,0.80,h)*smoothstep(0.65,0.10,abs(d.z))*1.25;',      // overhead softbox
+'  float s1=smoothstep(0.35,0.80,sin(a*2.0+0.6))*smoothstep(0.0,0.35,h)*smoothstep(0.75,0.35,h)*0.9;', // horizon strips
+'  float rim=smoothstep(0.92,1.0,cos(a-2.4))*smoothstep(0.0,0.2,h)*smoothstep(0.7,0.3,h)*0.8;',
+'  return col+vec3(box+s1*0.55+rim)*vec3(0.95,0.97,1.0);',
+'}',
+'vec3 paintC(vec3 N, vec3 V){',
+'  float nv=max(dot(N,V),0.0);',
+'  float F=0.05+0.95*pow(1.0-nv,5.0);',
+'  vec3 R=reflect(-V,N);',
+'  vec3 e=envC(R);',
+'  return vec3(0.006,0.007,0.010)+e*(0.05+0.80*F);',
+'}'
+].join('\n');
+
+var VERT_STD = [
+'varying vec3 vP; varying vec3 vN; varying vec3 vW; varying vec3 vWN; varying vec2 vMode; varying vec2 vUv;',
+'attribute vec2 aMode;',
+'void main(){',
+'  vP=position; vN=normal; vUv=uv; vMode=aMode;',
+'  vec4 wp=modelMatrix*vec4(position,1.0);',
+'  vW=wp.xyz; vWN=normalize(mat3(modelMatrix)*normal);',
+'  gl_Position=projectionMatrix*viewMatrix*wp;',
+'}'
+].join('\n');
+
+/* ------------------------------------------------------------------ *
+ *  Boot                                                               *
+ * ------------------------------------------------------------------ */
+var canvas = document.getElementById('c');
+var renderer;
+try {
+  renderer = new THREE.WebGLRenderer({canvas:canvas, antialias:true, alpha:true, powerPreference:'high-performance'});
+} catch(e){ renderer = null; }
+if (!renderer || !renderer.getContext()){
+  document.getElementById('loader').style.display='none';
+  document.getElementById('fatal').style.display='grid';
+  return;
+}
+renderer.setClearColor(0x000000, 0);
+var isGL2 = renderer.capabilities.isWebGL2;
+var maxAniso = renderer.capabilities.getMaxAnisotropy();
+
+var scene = new THREE.Scene();
+var camera = new THREE.PerspectiveCamera(30, 1, 0.05, 80);
+var camUniform = {value:new THREE.Vector3()};
+
+function loadImg(src){
+  return new Promise(function(res,rej){ var i=new Image(); i.onload=function(){res(i);}; i.onerror=rej; i.src=src; });
+}
+function mkTex(img, opts){
+  var t = new THREE.Texture(img);
+  t.wrapS = t.wrapT = THREE.ClampToEdgeWrapping;
+  var pot = !(img.width&(img.width-1)) && !(img.height&(img.height-1));
+  var mips = isGL2 || pot;
+  t.generateMipmaps = mips;
+  t.minFilter = mips ? THREE.LinearMipmapLinearFilter : THREE.LinearFilter;
+  t.magFilter = THREE.LinearFilter;
+  t.anisotropy = Math.min(8, maxAniso);
+  t.needsUpdate = true;
+  return t;
+}
+
+Promise.all(['left','right','front','rear','rearPriv','wheel'].map(function(k){return loadImg(TEX[k]);}))
+.then(function(imgs){
+  var T = {}; ['left','right','front','rear','rearPriv','wheel'].forEach(function(k,i){ T[k]=mkTex(imgs[i]); });
+  build(T);
+}).catch(function(e){
+  console.error(e);
+  document.getElementById('loader').textContent='Could not load textures.';
+});
+
+/* ------------------------------------------------------------------ *
+ *  Scene build                                                        *
+ * ------------------------------------------------------------------ */
+var uni = {};
+var car = new THREE.Group();
+var reflect = new THREE.Group();
+
+function build(T){
+  /* ---------- body hull ---------- */
+  var xs = [];
+  var NEND = 14;
+  for (var k=0;k<=NEND;k++){ xs.push(X_REAR + 0.36*Math.pow(k/NEND,2)); }
+  var xa = X_REAR + 0.36, xb = X_FRONT - 0.42;
+  var nMid = Math.round((xb-xa)/0.045);
+  for (var m=1;m<nMid;m++) xs.push(xa + (xb-xa)*m/nMid);
+  for (var k2=NEND;k2>=0;k2--){ xs.push(X_FRONT - 0.42*Math.pow(k2/NEND,2)); }
+
+  // smooth silhouettes slightly to hide polyline kinks
+  var NR = HALF*2-2;                        // verts per ring (centre verts not duplicated)
+  var pos = new Float32Array(xs.length*NR*3);
+  var mode = new Float32Array(xs.length*NR*2);
+  for (var i=0;i<xs.length;i++){
+    var x = xs[i], P = section(x);
+    var wsM = ss(X_COWL+0.02, X_COWL-0.14, x) * (1-ss(X_HEAD+0.14, X_HEAD, x));
+    var rgM = ss(X_ROOFEND+0.02, X_ROOFEND-0.10, x);
+    for (var j=0;j<NR;j++){
+      var idx, sgn;
+      if (j<HALF){ idx=j; sgn=1; } else { idx=NR-j; sgn=-1; }   // j=HALF.. -> mirrored half back down
+      var v = P[idx];
+      var o=(i*NR+j);
+      pos[o*3]=x; pos[o*3+1]=v[1]; pos[o*3+2]=v[0]*sgn;
+      var fi = idx>=9 ? 1 : (idx===8 ? 0.5 : 0);
+      var fg = P.g;
+      mode[o*2]   = wsM*fi*fg;
+      mode[o*2+1] = rgM*fi*fg;
+    }
+  }
+  var ind = [];
+  for (var a=0;a<xs.length-1;a++){
+    for (var b=0;b<NR;b++){
+      var b2=(b+1)%NR;
+      var i0=a*NR+b, i1=a*NR+b2, i2=(a+1)*NR+b, i3=(a+1)*NR+b2;
+      ind.push(i0,i2,i1, i1,i2,i3);
+    }
+  }
+  var geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.BufferAttribute(pos,3));
+  geo.setAttribute('aMode', new THREE.BufferAttribute(mode,2));
+  geo.setAttribute('uv', new THREE.BufferAttribute(new Float32Array(xs.length*NR*2),2));
+  geo.setIndex(ind);
+  geo.computeVertexNormals();
+  // make sure normals point outwards (flip winding if needed)
+  (function(){
+    var n=geo.attributes.normal, p=geo.attributes.position, mid=Math.floor(xs.length/2)*NR+5, s=0;
+    var cy = 0.9;
+    s = n.getX(mid)*0 + n.getZ(mid)*Math.sign(p.getZ(mid)) ;
+    if (s<0){
+      var id=geo.index.array;
+      for (var q=0;q<id.length;q+=3){ var t=id[q+1]; id[q+1]=id[q+2]; id[q+2]=t; }
+      geo.index.needsUpdate=true; geo.computeVertexNormals();
+    }
+  })();
+
+  uni.tL={value:T.left}; uni.tR={value:T.right}; uni.tF={value:T.front}; uni.tB={value:T.rear};
+  var bodyMat = new THREE.ShaderMaterial({
+    uniforms:{tL:uni.tL,tR:uni.tR,tF:uni.tF,tB:uni.tB,camPos:camUniform},
+    side:THREE.DoubleSide,
+    vertexShader:VERT_STD,
+    fragmentShader:[
+'precision highp float;',
+'uniform sampler2D tL,tR,tF,tB; uniform vec3 camPos;',
+'varying vec3 vP; varying vec3 vN; varying vec3 vW; varying vec3 vWN; varying vec2 vMode;',
+GLSL_ENV,
+'void main(){',
+'  vec3 p=vP;',
+'  if (abs(p.z)>0.5){',
+'    float d1=length(vec2(p.x-'+WHEEL_X.toFixed(3)+',p.y-'+TYRE_R.toFixed(3)+'));',
+'    float d2=length(vec2(p.x+'+WHEEL_X.toFixed(3)+',p.y-'+TYRE_R.toFixed(3)+'));',
+'    if (min(d1,d2)<0.428) discard;',
+'  }',
+'  if (!gl_FrontFacing){ gl_FragColor=vec4(0.010,0.010,0.012,1.0); return; }',
+'  vec3 n=normalize(vN);',
+'  vec2 uL=vec2(('+f(CAL.L.mid)+'-p.x*'+f(CAL.L.s)+')/'+f(CAL.L.w)+',1.-('+f(CAL.L.ground)+'-p.y*'+f(CAL.L.s)+')/'+f(CAL.L.h)+');',
+'  vec2 uR=vec2(('+f(CAL.R.mid)+'+p.x*'+f(CAL.R.s)+')/'+f(CAL.R.w)+',1.-('+f(CAL.R.ground)+'-p.y*'+f(CAL.R.s)+')/'+f(CAL.R.h)+');',
+'  vec2 uF=vec2(('+f(CAL.F.cx)+'-p.z*'+f(CAL.F.sh)+')/'+f(CAL.F.w)+',1.-('+f(CAL.F.ground)+'-p.y*'+f(CAL.F.sv)+')/'+f(CAL.F.h)+');',
+'  vec2 uB=vec2(('+f(CAL.B.cx)+'+p.z*'+f(CAL.B.sh)+')/'+f(CAL.B.w)+',1.-('+f(CAL.B.ground)+'-p.y*'+f(CAL.B.sv)+')/'+f(CAL.B.h)+');',
+'  float k=4.0;',
+'  float wL=pow(max(-n.z,0.),k), wR=pow(max(n.z,0.),k), wF=pow(max(n.x,0.),k), wB=pow(max(-n.x,0.),k);',
+'  float wP=wL+wR+wF+wB+1e-5;',
+'  vec3 cL=texture2D(tL,uL).rgb, cR=texture2D(tR,uR).rgb, cF=texture2D(tF,uF).rgb, cB=texture2D(tB,uB).rgb;',
+'  vec3 ph=(wL*cL+wR*cR+wF*cF+wB*cB)/wP;',
+'  ph=mix(ph,cF,vMode.x); ph=mix(ph,cB,vMode.y);',
+'  float wTop=pow(max(n.y,0.),3.0)*1.4*(1.0-max(vMode.x,vMode.y));',
+'  float wBot=smoothstep(0.55,0.9,-n.y)*3.0;',
+'  vec3 V=normalize(camPos-vW);',
+'  vec3 paint=paintC(normalize(vWN),V);',
+'  vec3 col=(ph*wP+paint*wTop+vec3(0.012)*wBot)/(wP+wTop+wBot);',
+'  gl_FragColor=vec4(col,1.0);',
+'}'].join('\n')
+  });
+  var body = new THREE.Mesh(geo, bodyMat);
+  car.add(body);
+
+  /* ---------- generic env-lit material ---------- */
+  function envMat(opts){
+    return new THREE.ShaderMaterial({
+      uniforms:{camPos:camUniform, tint:{value:new THREE.Color(opts.tint||0xffffff)}, refl:{value:opts.refl==null?0.9:opts.refl},
+                base:{value:new THREE.Color(opts.base||0x000000)}, rough:{value:opts.rough||0.0}, r0:{value:opts.r0==null?0.06:opts.r0}},
+      side:opts.side||THREE.FrontSide,
+      vertexShader:VERT_STD,
+      fragmentShader:[
+'precision highp float; uniform vec3 camPos,tint,base; uniform float refl,rough,r0;',
+'varying vec3 vP; varying vec3 vN; varying vec3 vW; varying vec3 vWN; varying vec2 vMode; varying vec2 vUv;',
+GLSL_ENV,
+'void main(){',
+'  vec3 N=normalize(vWN); vec3 V=normalize(camPos-vW);',
+'  if(!gl_FrontFacing) N=-N;',
+'  vec3 R=reflect(-V,N);',
+'  float nv=max(dot(N,V),0.0);',
+'  float F=0.04+0.96*pow(1.0-nv,5.0);',
+'  vec3 e=envC(R)*(1.0-rough*0.6);',
+'  vec3 c=base+tint*e*(r0+refl*F);',
+'  gl_FragColor=vec4(c,1.0);',
+'}'].join('\n')
+    });
+  }
+  var paintMat = envMat({base:0x050506,tint:0xffffff,refl:0.80,r0:0.06});
+  var chromeMat = envMat({base:0x0a0a0b,tint:0xdfe3e8,refl:0.5,r0:0.62});
+  var railMat = envMat({base:0x141517,tint:0xb8bcc2,refl:0.5,r0:0.22,rough:0.5});
+  var blackMat = envMat({base:0x060607,tint:0xffffff,refl:0.1,r0:0.03,rough:0.8,side:THREE.DoubleSide});
+
+  /* ---------- wheels ---------- */
+  var rimTex = T.wheel;
+  var rimTexL = rimTex; // same photo used for both sides; right side is mirrored through uv
+  var tyreProfile = [];
+  (function(){
+    var rIn=0.268, hw=TYRE_W/2;
+    var pts=[[rIn,-hw*0.84],[rIn+0.012,-hw*0.98],[rIn+0.05,-hw],[0.30,-hw*0.93],[0.345,-hw*0.8],[0.366,-hw*0.55],
+             [TYRE_R,-hw*0.25],[TYRE_R,hw*0.25],[0.366,hw*0.55],[0.345,hw*0.8],[0.30,hw*0.93],[rIn+0.05,hw],[rIn+0.012,hw*0.98],[rIn,hw*0.84]];
+    tyreProfile = pts.map(function(p){ return new THREE.Vector2(p[0],p[1]); });
+  })();
+  var tyreGeo = new THREE.LatheGeometry(tyreProfile, 72);
+  tyreGeo.rotateX(Math.PI/2);          // lathe axis Y -> world Z
+  var tyreMat = new THREE.ShaderMaterial({
+    uniforms:{camPos:camUniform},
+    vertexShader:VERT_STD, side:THREE.DoubleSide,
+    fragmentShader:[
+'precision highp float; uniform vec3 camPos;',
+'varying vec3 vP; varying vec3 vN; varying vec3 vW; varying vec3 vWN; varying vec2 vMode; varying vec2 vUv;',
+GLSL_ENV,
+'void main(){',
+'  vec3 N=normalize(vWN); vec3 V=normalize(camPos-vW);',
+'  float nv=max(dot(N,V),0.0);',
+'  float F=0.04+0.96*pow(1.0-nv,5.0);',
+'  float r=length(vP.xy);',
+'  float ang=atan(vP.y,vP.x);',
+'  float tread=smoothstep(0.35,0.5,abs(fract(ang*9.0)-0.5))*step(0.352,r)*0.012;',
+'  vec3 e=envC(reflect(-V,N));',
+'  vec3 c=vec3(0.020,0.020,0.022)+tread+e*(0.10*F+0.015);',
+'  gl_FragColor=vec4(c,1.0);',
+'}'].join('\n')
+  });
+  // rim face (photo of the actual wheel incl. brake) + barrel
+  var rimGeo = new THREE.CircleGeometry(0.2745, 72);
+  function rimMat(flip){
+    var t = rimTex.clone(); t.needsUpdate = true;
+    if (flip){ t.wrapS = THREE.RepeatWrapping; t.repeat.x=-1; t.offset.x=1; }
+    return new THREE.MeshBasicMaterial({map:t, side:THREE.FrontSide});
+  }
+  var barrelGeo = new THREE.CylinderGeometry(0.268,0.268,0.2,48,1,true); barrelGeo.rotateX(Math.PI/2);
+  var wheels = [];
+  [[WHEEL_X,1],[-WHEEL_X,1],[WHEEL_X,-1],[-WHEEL_X,-1]].forEach(function(w){
+    var side = w[1];                     // +1 car-right, -1 car-left (hence the matching photo side)
+    var gx = w[0];
+    var g = new THREE.Group();
+    g.position.set(gx, TYRE_R, side*(WHEEL_OUT - TYRE_W/2));
+    g.add(new THREE.Mesh(tyreGeo, tyreMat));
+    var face = new THREE.Mesh(rimGeo, rimMat(side>0));
+    face.position.z = side*(TYRE_W/2 - 0.052);
+    if (side<0) face.rotation.y = Math.PI;
+    g.add(face);
+    var barrel = new THREE.Mesh(barrelGeo, blackMat);
+    g.add(barrel);
+    car.add(g);
+    wheels.push(g);
+  });
+
+  /* ---------- mirrors ---------- */
+  [-1,1].forEach(function(s){
+    var mg = new THREE.Group();
+    var housing = new THREE.Mesh(new THREE.SphereGeometry(0.5,28,18), paintMat);
+    housing.scale.set(0.22,0.145,0.17);
+    mg.add(housing);
+    var stalk = new THREE.Mesh(new THREE.BoxGeometry(0.07,0.035,0.14), paintMat);
+    stalk.position.set(-0.01,-0.055,-s*0.1);
+    mg.add(stalk);
+    mg.position.set(0.50, 1.205, s*0.925);
+    mg.rotation.y = -s*0.12;
+    car.add(mg);
+  });
+
+  /* ---------- roof rails, spoiler, antenna ---------- */
+  (function(){
+    [-1,1].forEach(function(s){
+      var pts=[];
+      for (var x=X_HEAD+0.04; x>=wx(1290); x-=0.06){
+        var P=section(x);
+        var e=P[11]; if (P.gh<0.2) continue;
+        pts.push(new THREE.Vector3(x, e[1]+0.016, s*Math.min(e[0],0.505)));
+      }
+      var curve=new THREE.CatmullRomCurve3(pts);
+      var tube=new THREE.Mesh(new THREE.TubeGeometry(curve,80,0.0135,8,false), railMat);
+      tube.scale.y=1.0;
+      car.add(tube);
+    });
+    // spoiler lip over the tailgate glass
+    var sp = new THREE.Mesh(new THREE.BoxGeometry(0.2,0.022,1.02), paintMat);
+    var yR = interp(TOP, wx(1292));
+    sp.position.set(wx(1292)-0.07, yR-0.002, 0);
+    sp.rotation.z = 0.10;
+    car.add(sp);
+    var ant = new THREE.Mesh(new THREE.CylinderGeometry(0.004,0.006,0.07,8), blackMat);
+    ant.position.set(-1.46, interp(TOP,-1.46)+0.03, 0);
+    car.add(ant);
+  })();
+
+  /* ---------- exhaust: two round tips, rear left (as photographed) ---------- */
+  (function(){
+    var xEnd = X_REAR + 0.0;
+    [[-0.693,0.262],[-0.594,0.262]].forEach(function(t){
+      var g=new THREE.Group();
+      var tube=new THREE.Mesh(new THREE.CylinderGeometry(0.043,0.040,0.22,40,1,true), chromeMat);
+      tube.rotation.z=Math.PI/2; g.add(tube);
+      var lip=new THREE.Mesh(new THREE.TorusGeometry(0.043,0.0045,10,40), chromeMat);
+      lip.rotation.y=Math.PI/2; lip.position.x=-0.11; g.add(lip);
+      var inner=new THREE.Mesh(new THREE.CircleGeometry(0.039,32), blackMat);
+      inner.rotation.y=-Math.PI/2; inner.position.x=0.06; g.add(inner);
+      g.position.set(wx(1425)+0.11-0.012, t[1]+0.03, t[0]);   // lip sits ~1cm proud of the bumper's lower edge
+      car.add(g);
+    });
+  })();
+
+  /* ---------- hood roundel ---------- */
+  (function(){
+    var c=document.createElement('canvas'); c.width=c.height=256; var x=c.getContext('2d');
+    x.translate(128,128);
+    function disc(r,col){ x.beginPath(); x.arc(0,0,r,0,7); x.fillStyle=col; x.fill(); }
+    disc(126,'#0b0b0c'); disc(112,'#9a9da3'); disc(106,'#0b0b0c'); disc(98,'#111');
+    function quad(a,col){ x.beginPath(); x.moveTo(0,0); x.arc(0,0,98,a,a+Math.PI/2); x.closePath(); x.fillStyle=col; x.fill(); }
+    quad(Math.PI,'#1c69d4'); quad(0,'#1c69d4'); quad(Math.PI/2,'#f2f2f2'); quad(-Math.PI/2,'#f2f2f2');
+    var t=new THREE.CanvasTexture(c); t.anisotropy=4;
+    var xr=0; // find where hood height is ~1.0 m near the nose
+    for (var q=X_FRONT; q>0; q-=0.005){ if (interp(TOP,q)>=1.0){ xr=q; break; } }
+    var y=interp(TOP,xr), sl=(interp(TOP,xr-0.02)-interp(TOP,xr+0.02))/0.04;   // dy/dx (negative toward the nose)
+    var m=new THREE.Mesh(new THREE.CircleGeometry(0.05,48), new THREE.MeshBasicMaterial({map:t,transparent:true,polygonOffset:true,polygonOffsetFactor:-2,polygonOffsetUnits:-2}));
+    m.rotation.x=-Math.PI/2; m.rotation.z=0;
+    var tilt=Math.atan(-sl);                       // lean nose-down
+    m.rotation.set(-Math.PI/2,0,0); m.position.set(xr,y+0.004,0);
+    m.rotateOnWorldAxis(new THREE.Vector3(0,0,1), -Math.atan(Math.abs(sl)));
+    car.add(m);
+  })();
+
+  /* ---------- ground + soft shadow ---------- */
+  var groundMat = new THREE.ShaderMaterial({
+    transparent:true, depthWrite:false,
+    vertexShader:'varying vec3 vP; void main(){ vP=position; gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0);}',
+    fragmentShader:[
+'precision highp float; varying vec3 vP;',
+'void main(){',
+'  float r=length(vP.xy);',
+'  vec3 c=mix(vec3(0.150,0.152,0.162),vec3(0.085,0.088,0.095),smoothstep(0.0,9.0,r));',
+'  float a=0.90*(1.0-smoothstep(5.0,14.0,r));',
+'  gl_FragColor=vec4(c,a);',
+'}'].join('\n')
+  });
+  var ground = new THREE.Mesh(new THREE.CircleGeometry(16,64), groundMat);
+  ground.rotation.x=-Math.PI/2; ground.position.y=-0.001;
+  scene.add(ground);
+
+  var sc=document.createElement('canvas'); sc.width=256; sc.height=128; var sx=sc.getContext('2d');
+  sx.translate(128,64); sx.scale(1,0.5); sx.translate(-128,-128);
+  var gr=sx.createRadialGradient(128,128,6,128,128,126);
+  gr.addColorStop(0,'rgba(0,0,0,0.95)'); gr.addColorStop(0.55,'rgba(0,0,0,0.55)'); gr.addColorStop(1,'rgba(0,0,0,0)');
+  sx.fillStyle=gr; sx.fillRect(0,0,256,256);
+  var shadow=new THREE.Mesh(new THREE.PlaneGeometry(5.6,2.9), new THREE.MeshBasicMaterial({map:new THREE.CanvasTexture(sc),transparent:true,depthWrite:false}));
+  shadow.rotation.x=-Math.PI/2; shadow.position.set(-0.07,0.002,0);
+  scene.add(shadow);
+
+  scene.add(car);
+  // faint floor reflection: mirrored copy under the translucent floor
+  reflect.scale.y=-1;
+  car.children.forEach(function(ch){ reflect.add(ch.clone()); });
+  scene.add(reflect);
+
+  /* plate privacy */
+  var bPlate=document.getElementById('bPlate');
+  if (bPlate) bPlate.addEventListener('click', function(){
+    var on=bPlate.getAttribute('aria-pressed')!=='true';
+    bPlate.setAttribute('aria-pressed',on);
+    uni.tB.value = on ? T.rearPriv : T.rear;
+    wake();
+  });
+
+  document.getElementById('loader').classList.add('gone');
+  setTimeout(function(){ document.getElementById('loader').style.display='none'; }, 700);
+  resize(); wake();
+  requestAnimationFrame(frame);
+}
+
+/* ------------------------------------------------------------------ *
+ *  Orbit controller: touch drag, pinch zoom, inertia, 360° yaw        *
+ * ------------------------------------------------------------------ */
+var TAU = Math.PI*2;
+var HOME = {yaw:-0.62, pitch:0.20, dist:7.4, tx:-0.07, ty:0.80, tz:0};
+var st = {yaw:HOME.yaw, pitch:HOME.pitch, dist:HOME.dist, tx:HOME.tx, ty:HOME.ty, tz:HOME.tz};
+var vel = {yaw:0, pitch:0};
+var zoomVel = 0;
+var pointers = new Map();
+var lastMoveT = 0, pinch0 = 0, pinchDist0 = 0, lastT = 0, auto = true, autoSpeed = 0.18, idleSince = 0;
+var tween = null, dirty = true, fitDist = 7.4, maxDist = 18;
+// orbiting the car centre must stay outside the body; close-up targets (details) may go much closer
+function curMin(){ return Math.hypot(st.tx-HOME.tx, st.ty-HOME.ty, st.tz-HOME.tz) > 0.4 ? 0.7 : 2.6; }
+var pitchMin = 0.015, pitchMax = 1.52;
+
+function wake(){ dirty = true; }
+function stopMotion(){ vel.yaw=vel.pitch=0; zoomVel=0; tween=null; }
+
+function resize(){
+  var w = canvas.clientWidth, h = canvas.clientHeight;
+  if (!w || !h) return;
+  var dpr = Math.min(window.devicePixelRatio||1, 3) * qScale;
+  renderer.setPixelRatio(dpr);
+  renderer.setSize(w, h, false);
+  camera.aspect = w/h;
+  camera.fov = w/h < 1 ? Math.min(52, 30 + (1-w/h)*26) : 30;       // wider lens in portrait keeps the car large
+  var vf = camera.fov*Math.PI/180;
+  var hf = 2*Math.atan(Math.tan(vf/2)*camera.aspect);
+  // fit the 4.45 m x 1.7 m car (plus depth for perspective) into the viewport
+  fitDist = Math.max(2.45/Math.tan(hf/2), 1.15/Math.tan(vf/2)) + 1.1;
+  HOME.dist = fitDist*0.9;
+  if (!resize.done){ resize.done = true; st.dist = HOME.dist; }
+  maxDist = fitDist*2.0;
+  st.dist = Math.min(maxDist, Math.max(curMin(), st.dist));
+  camera.updateProjectionMatrix();
+  wake();
+}
+var qScale = 1;
+window.addEventListener('resize', resize);
+window.addEventListener('orientationchange', function(){ setTimeout(resize,250); });
+if (window.visualViewport) window.visualViewport.addEventListener('resize', resize);
+if (window.ResizeObserver) new ResizeObserver(resize).observe(canvas);
+
+// rad per px: a swipe across the full viewport width turns the car ~200°; slower when zoomed in close
+function dragScale(){
+  var z = Math.min(1, Math.max(0.35, st.dist/fitDist));
+  return (Math.PI*1.1) / Math.max(Math.min(canvas.clientWidth, 700), 300) * z;
+}
+
+canvas.addEventListener('pointerdown', function(e){
+  canvas.setPointerCapture(e.pointerId);
+  pointers.set(e.pointerId, {x:e.clientX, y:e.clientY, px:e.clientX, py:e.clientY, t:e.timeStamp||performance.now()});
+  canvas.classList.add('drag');
+  stopMotion(); auto=false; setAutoBtn(); hideHint();
+  if (pointers.size===2){
+    var p=Array.from(pointers.values());
+    pinchDist0 = Math.hypot(p[0].x-p[1].x, p[0].y-p[1].y); pinch0 = st.dist;
+  }
+  wake();
+});
+canvas.addEventListener('pointermove', function(e){
+  var p = pointers.get(e.pointerId); if (!p) return;
+  var now = e.timeStamp || performance.now();      // event time, not handler time (main thread may be busy)
+  var dx = e.clientX - p.x, dy = e.clientY - p.y, dt = Math.max(now-p.t,1);
+  p.x = e.clientX; p.y = e.clientY; p.t = now; lastMoveT = now;
+  if (pointers.size===1){
+    var k = dragScale();
+    st.yaw   -= dx*k;
+    st.pitch += dy*k;
+    st.pitch = Math.min(pitchMax, Math.max(pitchMin, st.pitch));
+    // velocity (rad/s), low-pass filtered
+    var vy = -dx*k/dt*1000, vp = dy*k/dt*1000;
+    vel.yaw = vel.yaw*0.6 + vy*0.4; vel.pitch = vel.pitch*0.6 + vp*0.4;
+  } else if (pointers.size===2){
+    var q=Array.from(pointers.values());
+    var d = Math.hypot(q[0].x-q[1].x, q[0].y-q[1].y);
+    if (pinchDist0>0){
+      var nd = pinch0 * pinchDist0 / Math.max(d,1);
+      var prev = st.dist;
+      st.dist = Math.min(maxDist, Math.max(curMin(), nd));
+      zoomVel = Math.log(st.dist/prev)/Math.max(dt,1)*1000;
+    }
+    vel.yaw=vel.pitch=0;
+  }
+  wake();
+});
+function endPointer(e){
+  var had = pointers.delete(e.pointerId);
+  if (!had) return;
+  try{ canvas.releasePointerCapture(e.pointerId);}catch(_){}
+  if (pointers.size===0) canvas.classList.remove('drag');
+  if (pointers.size===1){          // pinch -> drag handover without a jump
+    var r=Array.from(pointers.values())[0]; r.t=performance.now(); vel.yaw=vel.pitch=0;
+  }
+  if (pointers.size===0){
+    // a finger that rested before lifting must not fling
+    if ((e.timeStamp||performance.now())-lastMoveT > 90) { vel.yaw=vel.pitch=0; }
+    var vmax=5; vel.yaw=Math.max(-vmax,Math.min(vmax,vel.yaw)); vel.pitch=Math.max(-vmax,Math.min(vmax,vel.pitch));
+    idleSince = performance.now();
+  }
+  wake();
+}
+canvas.addEventListener('pointerup', endPointer);
+canvas.addEventListener('pointercancel', endPointer);
+canvas.addEventListener('lostpointercapture', endPointer);
+canvas.addEventListener('wheel', function(ev){
+  ev.preventDefault(); auto=false; setAutoBtn(); hideHint(); tween=null;
+  var f = Math.exp(ev.deltaY*(ev.ctrlKey?0.01:0.0014));
+  st.dist = Math.min(maxDist, Math.max(curMin(), st.dist*f)); wake();
+},{passive:false});
+canvas.addEventListener('keydown', function(ev){
+  var k=ev.key, s=0.12;
+  if (k==='ArrowLeft') st.yaw-=s; else if (k==='ArrowRight') st.yaw+=s;
+  else if (k==='ArrowUp') st.pitch=Math.min(pitchMax,st.pitch+s*0.6);
+  else if (k==='ArrowDown') st.pitch=Math.max(pitchMin,st.pitch-s*0.6);
+  else if (k==='+'||k==='=') st.dist=Math.max(curMin(),st.dist*0.9);
+  else if (k==='-') st.dist=Math.min(maxDist,st.dist*1.1);
+  else return;
+  auto=false; setAutoBtn(); ev.preventDefault(); wake();
+});
+
+// double-tap / double-click: toggle close-up vs. fit
+var lastTap = 0, lastTapX=0, lastTapY=0;
+canvas.addEventListener('pointerup', function(e){
+  if (e.pointerType==='mouse' && e.detail<2) return;
+  var now=performance.now();
+  if (now-lastTap<320 && Math.hypot(e.clientX-lastTapX,e.clientY-lastTapY)<28){
+    flyTo({dist: st.dist>fitDist*0.8 ? fitDist*0.5 : fitDist}); lastTap=0;
+  } else { lastTap=now; lastTapX=e.clientX; lastTapY=e.clientY; }
+});
+
+// iOS Safari: kill page zoom / rubber-banding gestures
+['gesturestart','gesturechange','gestureend'].forEach(function(n){
+  document.addEventListener(n, function(e){ e.preventDefault(); }, {passive:false});
+});
+document.addEventListener('touchmove', function(e){ if (e.target===canvas || e.touches.length>1) e.preventDefault(); }, {passive:false});
+document.addEventListener('contextmenu', function(e){ e.preventDefault(); });
+
+/* ---------------- camera presets ---------------- */
+function angDiff(a,b){ var d=(b-a)%TAU; if (d>Math.PI) d-=TAU; if (d<-Math.PI) d+=TAU; return d; }
+function flyTo(t, ms){
+  auto=false; setAutoBtn(); vel.yaw=vel.pitch=0; zoomVel=0;
+  var from = {yaw:st.yaw,pitch:st.pitch,dist:st.dist,tx:st.tx,ty:st.ty,tz:st.tz};
+  var to = {
+    yaw: t.yaw==null? st.yaw : from.yaw + angDiff(from.yaw, t.yaw),
+    pitch: t.pitch==null? st.pitch : t.pitch, dist: t.dist==null? st.dist : t.dist,
+    tx: t.tx==null? st.tx : t.tx, ty: t.ty==null? st.ty : t.ty, tz: t.tz==null? st.tz : t.tz
+  };
+  tween = {from:from,to:to,t0:performance.now(),ms:ms||950};
+  wake();
+}
+var DEG=Math.PI/180;
+var VIEWS = [
+  ['3/4',   {yaw:-0.62,pitch:0.20,dist:'home',tx:-0.07,ty:0.80,tz:0}],
+  ['Front', {yaw:0,pitch:0.07,dist:null,tx:-0.07,ty:0.80,tz:0}],
+  ['Left',  {yaw:-Math.PI/2,pitch:0.04,dist:null,tx:-0.07,ty:0.80,tz:0}],
+  ['Rear',  {yaw:Math.PI,pitch:0.07,dist:null,tx:-0.07,ty:0.80,tz:0}],
+  ['Right', {yaw:Math.PI/2,pitch:0.04,dist:null,tx:-0.07,ty:0.80,tz:0}],
+  ['Top',   {yaw:-Math.PI/2,pitch:1.5,dist:null,tx:-0.07,ty:0.6,tz:0}]
+];
+var DETAILS = [
+  ['Grille',     {yaw:0.10,pitch:0.07,dist:1.9,tx:2.05,ty:0.88,tz:0}],
+  ['Headlight',  {yaw:-0.55,pitch:0.10,dist:1.6,tx:2.0,ty:0.88,tz:-0.62}],
+  ['Taillight',  {yaw:Math.PI+0.55,pitch:0.10,dist:1.6,tx:-2.2,ty:1.03,tz:-0.62}],
+  ['Exhaust',    {yaw:Math.PI+0.50,pitch:0.14,dist:1.15,tx:-2.25,ty:0.30,tz:-0.64}],
+  ['Wheel',      {yaw:-Math.PI/2,pitch:0.04,dist:2.1,tx:WHEEL_X,ty:0.40,tz:-0.8}],
+  ['Badge',      {yaw:Math.PI-0.25,pitch:0.08,dist:1.25,tx:-2.24,ty:1.12,tz:0.30}]
+];
+function mkRow(el, label, list){
+  var l=document.createElement('span'); l.className='lbl'; l.textContent=label; el.appendChild(l);
+  list.forEach(function(v){
+    var b=document.createElement('button'); b.textContent=v[0]; b.type='button';
+    b.addEventListener('click', function(){
+      var t=Object.assign({},v[1]); if (t.dist==null) t.dist=fitDist; else if (t.dist==='home') t.dist=HOME.dist; flyTo(t, 1000); hideHint();
+    });
+    el.appendChild(b);
+  });
+}
+mkRow(document.getElementById('rowDetail'),'Detail',DETAILS);
+(function(){
+  var r=document.getElementById('rowView');
+  mkRow(r,'View',VIEWS);
+  var s=document.createElement('span'); s.style.flex='0 0 8px'; r.appendChild(s);
+  var ba=document.createElement('button'); ba.id='bAuto'; ba.type='button'; ba.textContent='Auto-rotate'; ba.setAttribute('aria-pressed','true');
+  ba.addEventListener('click', function(){ auto=!auto; tween=null; idleSince=performance.now(); setAutoBtn(); wake(); });
+  r.appendChild(ba);
+  var bp=document.createElement('button'); bp.id='bPlate'; bp.type='button'; bp.textContent='Hide plate'; bp.setAttribute('aria-pressed','false');
+  r.appendChild(bp);
+})();
+function setAutoBtn(){ var b=document.getElementById('bAuto'); if(b) b.setAttribute('aria-pressed', auto); }
+document.getElementById('bReset').addEventListener('click', function(){ var t=Object.assign({},HOME); flyTo(t,900); });
+document.getElementById('bSpec').addEventListener('click', function(){
+  var s=document.getElementById('specs'), on=!s.classList.contains('open');
+  s.classList.toggle('open',on); this.setAttribute('aria-pressed',on);
+});
+var hintEl=document.getElementById('hint'), hintGone=false;
+function hideHint(){ if(!hintGone){ hintGone=true; hintEl.classList.add('gone'); } }
+setTimeout(hideHint, 9000);
+
+/* ---------------- render loop ---------------- */
+var frames=0, slow=0, tAcc=0;
+function frame(now){
+  requestAnimationFrame(frame);
+  if (document.hidden) { lastT=now; return; }
+  var dt = Math.min((now-(lastT||now))/1000, 0.05); lastT = now;
+  var moving = false;
+
+  if (tween){
+    var k=Math.min(1,(now-tween.t0)/tween.ms), e=k<.5?4*k*k*k:1-Math.pow(-2*k+2,3)/2;
+    ['yaw','pitch','dist','tx','ty','tz'].forEach(function(n){ st[n]=tween.from[n]+(tween.to[n]-tween.from[n])*e; });
+    if (k>=1){ st.yaw=((st.yaw%TAU)+TAU)%TAU; if(st.yaw>Math.PI) st.yaw-=TAU; tween=null; idleSince=now; }
+    moving=true;
+  } else if (pointers.size===0){
+    if (Math.abs(vel.yaw)>0.0005 || Math.abs(vel.pitch)>0.0005){
+      st.yaw += vel.yaw*dt; st.pitch = Math.min(pitchMax, Math.max(pitchMin, st.pitch+vel.pitch*dt));
+      var damp = Math.exp(-dt*2.6); vel.yaw*=damp; vel.pitch*=damp; moving=true;
+    }
+    if (Math.abs(zoomVel)>0.0005){
+      st.dist = Math.min(maxDist, Math.max(curMin(), st.dist*Math.exp(zoomVel*dt)));
+      zoomVel*=Math.exp(-dt*5.0); moving=true;
+    }
+    if (auto){ st.yaw += autoSpeed*dt; moving=true; }
+  } else moving = true;
+
+  if (!(moving || dirty)) return;
+  dirty = false;
+
+  var cp=Math.cos(st.pitch), sp=Math.sin(st.pitch);
+  camera.position.set(st.tx+st.dist*cp*Math.cos(st.yaw), st.ty+st.dist*sp, st.tz+st.dist*cp*Math.sin(st.yaw));
+  camera.lookAt(st.tx,st.ty,st.tz);
+  camUniform.value.copy(camera.position);
+  if (!(window.__x3 && window.__x3.noRender)) renderer.render(scene,camera);
+
+  // adaptive resolution: back off if the device struggles while animating
+  if (moving){
+    tAcc+=dt; frames++;
+    if (frames>=40){
+      var avg=tAcc/frames; frames=0; tAcc=0;
+      if (avg>0.030 && qScale>0.6){ qScale=Math.max(0.6,qScale*0.8); resize(); }
+    }
+  }
+  if (moving) dirty = true;
+}
+
+if (location.search.indexOf('debug')>-1) window.__x3={st:st,vel:vel,pointers:pointers};
+canvas.addEventListener('webglcontextlost', function(e){ e.preventDefault(); }, false);
+canvas.addEventListener('webglcontextrestored', function(){ location.reload(); }, false);
+document.addEventListener('visibilitychange', wake);
+})();
+</script>
+</body>
+</html>
