@@ -1,0 +1,21 @@
+{
+  "name": "echo-virtual-club",
+  "version": "2.0.0",
+  "private": true,
+  "description": "ECHO — a virtual nightclub crowd that reacts to your DJ set in real time.",
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview --host",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "three": "^0.186.1"
+  },
+  "devDependencies": {
+    "@types/three": "^0.186.0",
+    "typescript": "^5.9.3",
+    "vite": "^6.4.3"
+  }
+}
