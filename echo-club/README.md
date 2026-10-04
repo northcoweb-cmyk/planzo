@@ -44,6 +44,8 @@ cool-downs and recent-drop memory). Pick one input:
 | **Audio file** | Plays + analyses a local file. | |
 | **Manual** | No capture. Tap tempo, set BPM, trigger builds/drops, energy slider. | Always available; used automatically if capture fails or the source ends. |
 
+**Backup headset mic.** Tick *Headset mic as backup* (launcher or Settings → Audio) to run a second listener beside any main input. If the main input hears nothing it takes over (HUD shows BACKUP MIC); with the DJ controller it also supplies the tempo/beat, and covers the controller if Serato has locked it.
+
 If something isn't supported ECHO says so in the UI, keeps running, and offers the next-best input.
 
 ## Architecture

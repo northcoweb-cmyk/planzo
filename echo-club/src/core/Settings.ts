@@ -7,6 +7,9 @@ export interface Settings {
   audioInput: AudioInputKind;
   audioDeviceId: string;
   midiDeviceId: string;
+  /** Headset-mic backup listener that runs alongside the main input. */
+  backupMic: boolean;
+  backupMicDeviceId: string;
   /** Manual / fallback BPM. 0 = auto-detect when audio is live. */
   bpm: number;
   sensitivity: number; // 0..100
@@ -37,6 +40,8 @@ export const DEFAULT_SETTINGS: Settings = {
   audioInput: 'system',
   audioDeviceId: '',
   midiDeviceId: '',
+  backupMic: false,
+  backupMicDeviceId: '',
   bpm: 124,
   sensitivity: 55,
   beatSensitivity: 55,

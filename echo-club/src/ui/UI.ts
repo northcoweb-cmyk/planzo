@@ -89,6 +89,8 @@ export class UI {
   private midiMonitor!: HTMLElement;
   private midiBound: Record<string, HTMLElement> = {};
   private midiPopulated = false;
+  private backupPills: HTMLElement[] = [];
+  private backupSelects: HTMLSelectElement[] = [];
 
   constructor(
     private readonly rootEl: HTMLElement,
@@ -212,7 +214,12 @@ export class UI {
     fsBox.onchange = () => this.settings.set({ autoFullscreen: fsBox.checked });
     fsLabel.append(fsBox, document.createTextNode('Go fullscreen on start'));
     this.refreshers.push(() => { fsBox.checked = this.settings.get().autoFullscreen; });
-    foot.append(start, fsLabel, el('span', { class: 'hint-line' }, 'Tip: drag this window to your left monitor, then press <span class="kbd">F</span>'));
+    const bkLabel = el('label', { class: 'check', title: 'Also listens through your headset mic as a backup if the main input hears nothing' });
+    const bkBox = el('input', { type: 'checkbox', checked: s.backupMic });
+    bkBox.onchange = () => { this.settings.set({ backupMic: bkBox.checked }); if (bkBox.checked) void this.populateDevices(true); };
+    bkLabel.append(bkBox, document.createTextNode('Headset mic as backup'));
+    this.refreshers.push(() => { bkBox.checked = this.settings.get().backupMic; });
+    foot.append(start, fsLabel, bkLabel, el('span', { class: 'hint-line' }, 'Tip: drag this window to your left monitor, then press <span class="kbd">F</span>'));
     card.appendChild(foot);
     card.appendChild(el('div', { id: 'start-error' }));
 
@@ -283,6 +290,13 @@ export class UI {
       } catch { /* labels stay hidden until permission is granted */ }
     }
     const devices = await this.hooks.listDevices();
+    for (const sel of this.backupSelects) {
+      const cur = this.settings.get().backupMicDeviceId;
+      sel.innerHTML = '';
+      sel.appendChild(el('option', { value: '' }, 'Default microphone'));
+      for (const d of devices) sel.appendChild(el('option', { value: d.id }, d.label));
+      sel.value = devices.some((d) => d.id === cur) ? cur : '';
+    }
     for (const sel of this.deviceSelects) {
       const cur = this.settings.get().audioDeviceId;
       sel.innerHTML = '';
@@ -542,6 +556,17 @@ export class UI {
       this.midiPanel.appendChild(reconnect);
       p.appendChild(this.midiPanel);
       this.midiRefreshBound();
+      p.appendChild(el('div', { class: 'sec' }, 'Backup headset mic'));
+      toggle(p, 'Use headset mic as backup', 'backupMic', 'Runs alongside your main input. If the main input hears nothing it takes over; with the DJ controller it adds the tempo and beat. It only listens — nothing is recorded or played back.');
+      const bkRow = el('div', { class: 'row' }, '<div class="top"><label>Headset mic</label></div>');
+      const bsel = el('select');
+      bsel.onchange = () => this.settings.set({ backupMicDeviceId: bsel.value });
+      this.backupSelects.push(bsel);
+      bkRow.appendChild(bsel);
+      p.appendChild(bkRow);
+      const bpill = el('div', { class: 'status-pill' }, '<i></i><span>Off</span>');
+      this.backupPills.push(bpill);
+      p.appendChild(bpill);
       toggle(p, 'Monitor input through speakers', 'monitorAudio', 'Only for line-in/mic testing. Leave off to avoid feedback.');
       p.appendChild(el('div', { class: 'sec' }, 'Tempo & sensitivity'));
       slider(p, 'Manual BPM', 'bpm', 70, 180, 1, (v) => `${v}`, 'Used in Manual mode and as a fallback if the tempo can\'t be detected. Tap beat overrides it.');
@@ -682,6 +707,13 @@ export class UI {
 
   setQualityRecommendation(text: string): void {
     if (this.qualityRec) this.qualityRec.textContent = text;
+  }
+
+  setBackupStatus(status: string, text: string): void {
+    for (const pill of this.backupPills) {
+      pill.className = `status-pill ${status === 'live' ? 'live' : status === 'error' ? 'err' : ''}`;
+      pill.querySelector('span')!.textContent = text;
+    }
   }
 
   setAudioStatus(status: string, text: string): void {

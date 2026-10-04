@@ -26,6 +26,9 @@ class ClubApp {
   readonly settings = new SettingsManager();
   readonly audio = new AudioEngine();
   readonly midi = new MidiEngine();
+  /** Second, independent audio chain: the headset mic as a backup listener. */
+  readonly backup = new AudioEngine();
+  private backupUsed = false;
   readonly energy = new EnergyEngine();
   readonly session = new SessionManager();
   readonly crowd = new CrowdManager();
@@ -120,11 +123,13 @@ class ClubApp {
     // Kick off fullscreen in the same user gesture as the click (and any system-audio prompt).
     if (s.autoFullscreen) void this.requestFullscreen();
     const res = await this.connectAudio(file);
-    if (!res.ok && s.audioInput !== 'manual') {
+    if (s.backupMic) await this.syncBackup();
+    if (!res.ok && s.audioInput !== 'manual' && !(s.backupMic && this.backup.isLive)) {
       // Do not trap the user: tell them why and let them pick something else, or continue manually.
       if (document.fullscreenElement) void document.exitFullscreen().catch(() => undefined);
       return res;
     }
+    if (!res.ok) this.ui.notice(`${res.message} — using the headset mic as backup.`, true, 8000);
     this.beginSession();
     return res;
   }
@@ -148,6 +153,7 @@ class ClubApp {
     this.running = false;
     this.session.stop();
     this.audio.disconnect();
+    this.backup.disconnect();
     if (document.fullscreenElement) void document.exitFullscreen().catch(() => undefined);
     this.ui.showLauncher();
     this.ui.setAudioStatus('idle', 'Not connected');
@@ -174,6 +180,20 @@ class ClubApp {
       if (s.audioInput === 'manual') this.ui.notice('Manual mode — tap T to set the beat.', false, 4500);
     }
     return res;
+  }
+
+  /** (Re)start or stop the headset-mic backup listener to match the settings. */
+  private async syncBackup(): Promise<void> {
+    const s = this.settings.get();
+    if (!s.backupMic) {
+      this.backup.disconnect();
+      this.ui.setBackupStatus('off', 'Off');
+      return;
+    }
+    this.backup.setBeatSensitivity(s.beatSensitivity / 100);
+    const r = await this.backup.connect('mic', { deviceId: s.backupMicDeviceId || undefined });
+    this.ui.setBackupStatus(r.ok ? 'live' : 'error', r.ok ? `Listening · ${this.backup.label}` : r.message);
+    if (!r.ok) this.ui.notice(`Backup mic: ${r.message}`, true, 7000);
   }
 
   // ----------------------------------------------------------------------- controls
@@ -263,6 +283,7 @@ class ClubApp {
     if (changed.includes('handsUpSensitivity') || changed.includes('phoneFrequency')) this.crowd.applySettings(s);
     if (changed.includes('beatSensitivity')) this.audio.setBeatSensitivity(s.beatSensitivity / 100);
     if (changed.includes('debug')) this.debug.enabled = s.debug;
+    if ((changed.includes('backupMic') || changed.includes('backupMicDeviceId')) && this.running) void this.syncBackup();
     if (changed.includes('autoQuality')) this.perf.autoEnabled = s.autoQuality;
     if (changed.includes('bpm') && s.audioInput === 'manual') this.energy.clock.clearTap();
     if (changed.includes('audioInput') || changed.includes('audioDeviceId')) {
@@ -339,11 +360,28 @@ class ClubApp {
       const dt = Math.min(this.maxDt, rawDt);
       this.simTime += dt;
       const midiOn = this.midi.connected && s.audioInput === 'midi';
-      const features = midiOn
-        ? this.midi.features(dt, this.energy.clock.bpm, this.energy.clock.tick, this.energy.clock.beatInBar)
-        : this.audio.update(real);
-      const live = midiOn || this.audio.isLive;
-      if (midiOn) { const h = this.midi.consumeHits(); if (h > 0) this.energy.bump(Math.min(h, 3)); }
+      const bk = this.backup.isLive ? this.backup.update(real) : null;
+      let features;
+      let live: boolean;
+      let useBackup = false;
+      if (midiOn) {
+        features = this.midi.features(dt, this.energy.clock.bpm, this.energy.clock.tick, this.energy.clock.beatInBar);
+        const h = this.midi.consumeHits();
+        if (h > 0) this.energy.bump(Math.min(h, 3));
+        live = true;
+        if (!this.midi.hasActivity && this.midi.idleSeconds > 5 && bk?.signal) {
+          // controller is silent (probably owned by Serato): hear the music instead
+          features = bk; useBackup = true;
+        } else if (bk && bk.signal && bk.bpmConfidence > 0.4) {
+          // controller gives the mood, the mic gives the tempo + beat grid
+          features = { ...features, beat: bk.beat, strongBeat: bk.strongBeat, beatInBar: bk.beatInBar, bpm: bk.bpm, bpmConfidence: bk.bpmConfidence };
+        }
+      } else {
+        features = this.audio.update(real);
+        live = this.audio.isLive;
+        if (!(live && features.signal) && bk?.signal) { features = bk; live = true; useBackup = true; }
+      }
+      this.backupUsed = useBackup;
       this.frame = this.energy.update(dt, this.simTime, features, live, s);
       const f = this.frame;
       if (f.events.drop) { this.lastDropAt = this.simTime; this.debug.lastDropAt = this.simTime; }
@@ -361,7 +399,7 @@ class ClubApp {
       this.scene.setGrade(real, f.dropIntensity * 0.0035, 0.5);
 
       this.ui.updateHud(f, {
-        input: midiOn ? 'CONTROLLER' : live ? this.audio.label.toUpperCase() : s.audioInput === 'manual' ? 'MANUAL' : 'NO SIGNAL',
+        input: this.backupUsed ? 'BACKUP MIC' : midiOn ? 'CONTROLLER' : live ? this.audio.label.toUpperCase() : s.audioInput === 'manual' ? 'MANUAL' : 'NO SIGNAL',
         live, manual: !live, people: this.crowd.count, attendance: this.session.stats.attendance, stateLabel: STATE_LABEL[f.state],
       }, real);
       this.ui.updateSession(this.session.stats);
