@@ -67,9 +67,9 @@ export function crowdBarrier(ctx: BuildContext, root: THREE.Group, width: number
 }
 
 /** Compact speakers flanking the DJ position (front-of-house tops). */
-export function boothSpeakers(ctx: BuildContext, root: THREE.Group, x = 3.3, z = -2.9, y = 0.8): void {
+export function boothSpeakers(ctx: BuildContext, root: THREE.Group, x = 4.0, z = -1.2, y = 0.55): void {
   for (const s of [-1, 1]) {
-    const sp = speakerStack(ctx, { subs: 1, tiers: 2, width: 0.7 });
+    const sp = speakerStack(ctx, { subs: 1, tiers: 1, width: 0.7 });
     sp.position.set(s * x, y, z);
     sp.rotation.y = -s * 0.28;
     root.add(sp);
@@ -80,4 +80,24 @@ export function boothSpeakers(ctx: BuildContext, root: THREE.Group, x = 3.3, z =
 export function frontOfStage(ctx: BuildContext, root: THREE.Group, zEdge = -2.5): void {
   root.add(ctx.strip('stage', [8.8, 0.04, 0.04], [0, 0.18, zEdge - 0.02], 0.5));
   root.add(at(cyl(0.02, 0.02, 0.02, ctx.mats.steel(), 6), 0, 0, 0));
+}
+
+/**
+ * People close to the DJ: a row dancing ON the stage beside the booth, plus the front of the floor
+ * pressed right up against the rail — so the crowd is in your face and wraps around the edges.
+ */
+export function addCloseCrowd(ctx: BuildContext): void {
+  // beside the stage, level with the DJ's elbows: the "crowd to my left / right" feeling
+  for (const side of [-1, 1] as const) {
+    ctx.crowdRegions.push({
+      id: `flank-${side}`, kind: 'floor', x0: side < 0 ? -11 : 4.9, x1: side < 0 ? -4.9 : 11, z0: -3.2, z1: 1.2,
+      y: 0, density: 1.5, facing: 0.35, arrivalBias: -0.35,
+    });
+  }
+  for (const side of [-1, 1] as const) {
+    ctx.crowdRegions.push({
+      id: `stage-${side}`, kind: 'stage', x0: side < 0 ? -3.7 : 1.9, x1: side < 0 ? -1.9 : 3.7, z0: -2.45, z1: -1.75,
+      y: 0.55, density: 1.5, facing: 0.55, arrivalBias: -0.4,
+    });
+  }
 }

@@ -31,8 +31,8 @@ const PAD_COLORS = ['#ff2a3d', '#ff8a1f', '#2fd6ff', '#3d5bff', '#ff2a3d', '#33f
 export class DJBooth {
   readonly object = new THREE.Group();
   /** Heights the camera / crowd layout rely on. */
-  readonly stageY = 0.8;
-  readonly tableTopY = 1.74;
+  readonly stageY = 0.55;
+  readonly tableTopY = 1.5;
   private readonly jogs: THREE.Group[] = [];
   private readonly pads: { mat: THREE.MeshBasicMaterial; base: THREE.Color; deck: number; idx: number }[] = [];
   private readonly rings: THREE.MeshBasicMaterial[] = [];
@@ -136,8 +136,8 @@ export class DJBooth {
     }
 
     // ---- flanking props: plants + PA stacks live in the venue; booth carries the plants
-    g.add(at(plant(ctx, 1.25), -3.4, sy, -1.6));
-    g.add(at(plant(ctx, 1.1), 3.4, sy, -1.4));
+    g.add(at(plant(ctx, 1.25), -4.15, sy, 0.3));
+    g.add(at(plant(ctx, 1.1), 4.15, sy, 0.3));
 
     // ---- booth light (warm, small) so the controller reads in the dark
     this.controllerLight.position.set(0, topY + 0.85, -0.6);

@@ -7,9 +7,12 @@ import { clamp, damp } from '../util/math';
  * bounce, a slow push during builds and a short low-frequency shake on drops. Scaled by the
  * "Camera Movement" setting (0 = locked off).
  */
+/** Wide lens: the crowd wraps around the edges of the frame, like standing in the booth. */
+const FOV = 68;
+
 export class CameraRig {
   readonly camera: THREE.PerspectiveCamera;
-  readonly base = new THREE.Vector3(0, 2.56, 0.55);
+  readonly base = new THREE.Vector3(0, 2.3, 0.45);
   readonly lookAt = new THREE.Vector3(0, 1.75, -16);
   private push = 0;
   private shake = 0;
@@ -18,7 +21,7 @@ export class CameraRig {
   private look = new THREE.Vector3();
 
   constructor(aspect: number) {
-    this.camera = new THREE.PerspectiveCamera(58, aspect, 0.1, 600);
+    this.camera = new THREE.PerspectiveCamera(FOV, aspect, 0.1, 600);
     this.camera.position.copy(this.base);
     this.camera.lookAt(this.lookAt);
   }
@@ -32,7 +35,12 @@ export class CameraRig {
     this.lookAt.set(x, y, z);
   }
 
+  /** Extra look angle (radians) about the vertical axis; negative = left. */
+  yaw = 0;
+  private yawSmooth = 0;
+
   update(f: CrowdFrame, movement01: number, time: number, dt: number): void {
+    this.yawSmooth = damp(this.yawSmooth, this.yaw, 5, dt);
     const k = movement01;
     this.push = damp(this.push, f.buildIntensity * 0.55 + f.dropIntensity * 0.1, 0.9, dt);
     this.shake = damp(this.shake, f.dropIntensity > 0.6 ? f.dropIntensity : 0, 4, dt);
@@ -53,9 +61,16 @@ export class CameraRig {
     this.look.copy(this.lookAt);
     this.look.x += sway * 0.7;
     this.look.y += beatBob * 0.6 + sy * 0.5;
+    if (Math.abs(this.yawSmooth) > 1e-4) {
+      // rotate the view target about the camera so you can turn toward the crowd at your side
+      const dx = this.look.x - this.camera.position.x, dz = this.look.z - this.camera.position.z;
+      const c = Math.cos(this.yawSmooth), sn = Math.sin(this.yawSmooth);
+      this.look.x = this.camera.position.x + dx * c + dz * sn;
+      this.look.z = this.camera.position.z - dx * sn + dz * c;
+    }
     this.camera.lookAt(this.look);
     // clamp subtle FOV breathing on the drop
-    const targetFov = 58 - clamp(f.dropIntensity, 0, 1) * 1.8 * k;
+    const targetFov = FOV - clamp(f.dropIntensity, 0, 1) * 1.8 * k;
     if (Math.abs(this.camera.fov - targetFov) > 0.01) {
       this.camera.fov = damp(this.camera.fov, targetFov, 3, dt);
       this.camera.updateProjectionMatrix();

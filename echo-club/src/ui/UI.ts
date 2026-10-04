@@ -651,6 +651,7 @@ export class UI {
       this.refreshers.push(() => { lm.value = this.settings.get().lightingMode; });
       slider(p, 'Lighting intensity', 'lightingIntensity', 20, 150, 1, pct);
       slider(p, 'Fog amount', 'fogAmount', 0, 100, 1, pct);
+      slider(p, 'Look angle', 'cameraYaw', -70, 70, 1, (v) => (v === 0 ? 'centre' : v < 0 ? `${-v}° left` : `${v}° right`), 'Turn toward the crowd at your side. Keys: [ left · ] right · \\ centre.');
       slider(p, 'Camera movement', 'cameraMovement', 0, 100, 1, pct, 'Beat bounce, slow build push and drop shake. 0 = locked off.');
       toggle(p, 'Reduce flashing', 'reduceFlashing', 'Disables strobes and lasers — for photosensitivity or a calmer look.');
     }

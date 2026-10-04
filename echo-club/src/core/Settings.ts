@@ -31,6 +31,8 @@ export interface Settings {
   lightingMode: LightingOverride;
   fogAmount: number; // 0..100
   cameraMovement: number; // 0..100
+  /** Look angle in degrees: negative = turn toward the crowd on your left. */
+  cameraYaw: number;
   quality: QualityId;
   autoQuality: boolean;
   reduceFlashing: boolean;
@@ -64,6 +66,7 @@ export const DEFAULT_SETTINGS: Settings = {
   lightingMode: 'AUTO',
   fogAmount: 55,
   cameraMovement: 50,
+  cameraYaw: 0,
   quality: 'HIGH',
   autoQuality: true,
   reduceFlashing: false,

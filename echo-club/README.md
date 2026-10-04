@@ -27,6 +27,7 @@ npm run build      # production bundle in dist/  (npm run preview to serve it)
 | `D` | trigger a drop | | `A` | audio debug panel |
 | `↑` / `↓` | crowd energy + / − | | `` ` `` or `G` | debug overlay |
 | `C` / `V` | calm / hype the crowd for ~25 s | | `1`–`5` | switch venue |
+| `[` / `]` | look left / right (`\\` = centre) | | | |
 
 ## Connecting your music
 

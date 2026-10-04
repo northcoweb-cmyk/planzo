@@ -70,7 +70,9 @@ export function generateLayout(regions: CrowdRegion[], o: LayoutOptions): Person
         const dist = Math.hypot(dx, dz);
         const facing = r.facing ?? 0.88;
         // Models face +Z and the DJ/camera is at +Z, so yaw ≈ 0 means "facing the DJ".
-        const yaw = rnd() < facing ? (rnd() - 0.5) * 0.7 : (rnd() - 0.5) * Math.PI * 1.4;
+        let yaw = rnd() < facing ? (rnd() - 0.5) * 0.7 : (rnd() - 0.5) * Math.PI * 1.4;
+        // people sharing the stage with the DJ mostly face out at the crowd
+        if (r.kind === 'stage' && rnd() < 0.75) yaw = Math.PI + (rnd() - 0.5) * 0.9;
         // Arrival: front rows first (dance floor fills from the stage), balconies later.
         const arrival = Math.min(1, Math.max(0, (dist / 40) * 0.75 + rnd() * 0.3 + (r.arrivalBias ?? 0)));
         let lod: 0 | 1 | 2 = dist / o.detailBias < 11 ? 0 : dist / o.detailBias < 26 ? 1 : 2;

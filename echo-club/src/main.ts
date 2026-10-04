@@ -283,6 +283,9 @@ class ClubApp {
         case 'v': this.energy.crowdHype(this.simTime); break;
         case 'f': e.preventDefault(); this.toggleFullscreen(); break;
         case 'h': this.ui.toggleUiHidden(); break;
+        case '[': this.settings.set({ cameraYaw: clamp(this.settings.get().cameraYaw - 10, -70, 70) }); break;
+        case ']': this.settings.set({ cameraYaw: clamp(this.settings.get().cameraYaw + 10, -70, 70) }); break;
+        case '\\': this.settings.set({ cameraYaw: 0 }); break;
         case 's': this.ui.toggleSettings(); break;
         case 'a': this.ui.toggleAudioPanel(); break;
         case '`': case 'g': this.settings.set({ debug: !this.settings.get().debug }); break;
@@ -443,6 +446,7 @@ class ClubApp {
       this.session.update(f);
       this.crowd.update(f, dt, this.simTime);
       this.env.update(f, s, dt, this.simTime, this.midi.connected ? this.midi.view() : null);
+      this.camera.yaw = (s.cameraYaw * Math.PI) / 180;
       this.camera.update(f, s.cameraMovement / 100, this.simTime, dt);
       this.beatFlash = f.events.beat;
 

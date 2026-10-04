@@ -6,7 +6,7 @@ import {
 } from '../architecture/parts';
 import type { BuildContext } from '../architecture/BuildContext';
 import { LedWall } from '../LedWall';
-import { boothSpeakers, crowdBarrier, frontOfStage, hallShell } from './common';
+import { addCloseCrowd, boothSpeakers, crowdBarrier, frontOfStage, hallShell } from './common';
 import type { VenueBuild, VenueDefinition } from './VenueTypes';
 
 /* ------------------------------------------------------------------------------------------ */
@@ -137,14 +137,15 @@ function buildDcNight(ctx: BuildContext): VenueBuild {
   pendants(ctx, root, [[-14, 8.6, -6], [14, 8.6, -6], [-14, 8.6, -30], [14, 8.6, -30], [0, 8.8, -33]]);
 
   washers(ctx, halfW, [-5, -15, -25, -34], 9);
-  crowdBarrier(ctx, root, 12, -3.1);
+  crowdBarrier(ctx, root, 12, -2.95);
   boothSpeakers(ctx, root);
+  addCloseCrowd(ctx);
   frontOfStage(ctx, root, -2.5);
   neonSignOnWall(ctx, root, 'ECHO', '#5f8bff', -halfW + 0.3, 6.1, -8, Math.PI / 2);
 
   // crowd
   ctx.crowdRegions.push(
-    { id: 'floor-front', kind: 'floor', x0: -12.5, x1: 12.5, z0: -20, z1: -4.2, y: 0, density: 1.3 },
+    { id: 'floor-front', kind: 'floor', x0: -12.5, x1: 12.5, z0: -20, z1: -3.3, y: 0, density: 1.5, arrivalBias: -0.2 },
     { id: 'floor-back', kind: 'floor', x0: -12.5, x1: 12.5, z0: -34, z1: -20, y: 0, density: 0.85, arrivalBias: 0.06 },
     { id: 'bar-L', kind: 'bar', x0: -17, x1: -13.8, z0: -27.5, z1: -14.5, y: 0, density: 0.55, arrivalBias: 0.2, facing: 0.4 },
     { id: 'balcony-L', kind: 'balcony', x0: -17.3, x1: -14.3, z0: -33, z1: -6.5, y: 4.6, density: 0.6, minLod: 1, arrivalBias: 0.25 },
@@ -227,11 +228,12 @@ function buildWarehouse(ctx: BuildContext): VenueBuild {
   for (const x of [-12, -4, 4, 12]) ctx.fixtures.push({ kind: 'back', pos: [x, 0.4, zB + 1.2] });
   pendants(ctx, root, [[-10, 11, -8], [10, 11, -8], [-10, 12, -26], [10, 12, -26]]);
   washers(ctx, halfW, [-6, -16, -26, -36], 12);
-  crowdBarrier(ctx, root, 12, -3.1);
-  boothSpeakers(ctx, root, 3.4, -2.9);
+  crowdBarrier(ctx, root, 12, -2.95);
+  boothSpeakers(ctx, root, 4.0, -1.2);
+  addCloseCrowd(ctx);
   frontOfStage(ctx, root, -2.5);
   ctx.crowdRegions.push(
-    { id: 'floor-front', kind: 'floor', x0: -19, x1: 19, z0: -24, z1: -4.2, y: 0, density: 0.95 },
+    { id: 'floor-front', kind: 'floor', x0: -19, x1: 19, z0: -24, z1: -3.3, y: 0, density: 1.2, arrivalBias: -0.2 },
     { id: 'floor-back', kind: 'floor', x0: -19, x1: 19, z0: -42, z1: -24, y: 0, density: 0.55, arrivalBias: 0.06 },
     { id: 'mezz', kind: 'balcony', x0: -23, x1: -20.2, z0: -38, z1: -6.5, y: 5.2, density: 0.55, minLod: 1, arrivalBias: 0.25 },
   );
@@ -275,11 +277,12 @@ function buildUnderground(ctx: BuildContext): VenueBuild {
   bg.position.set(-halfW + 1.9, 0, -16);
   root.add(bg);
   root.add(at(plant(ctx, 1), halfW - 1.2, 0, -6));
-  crowdBarrier(ctx, root, 10, -3.1);
-  boothSpeakers(ctx, root, 3.0, -2.8);
+  crowdBarrier(ctx, root, 10, -2.95);
+  boothSpeakers(ctx, root, 4.0, -1.2);
+  addCloseCrowd(ctx);
   frontOfStage(ctx, root, -2.5);
   ctx.crowdRegions.push(
-    { id: 'floor', kind: 'floor', x0: -8.6, x1: 8.6, z0: -24, z1: -4.1, y: 0, density: 2.0 },
+    { id: 'floor', kind: 'floor', x0: -8.6, x1: 8.6, z0: -24, z1: -3.3, y: 0, density: 2.1, arrivalBias: -0.2 },
     { id: 'bar', kind: 'bar', x0: -9.2, x1: -7.2, z0: -19, z1: -12, y: 0, density: 0.6, minLod: 1, arrivalBias: 0.2, facing: 0.4 },
   );
   return {
@@ -391,12 +394,13 @@ function buildRooftop(ctx: BuildContext): VenueBuild {
   sky.traverse((o) => { o.userData.dynamic = true; });
 
   ctx.crowdRegions.push(
-    { id: 'deck-front', kind: 'floor', x0: -11.5, x1: 11.5, z0: -17, z1: -4.2, y: 0, density: 1.15 },
+    { id: 'deck-front', kind: 'floor', x0: -11.5, x1: 11.5, z0: -17, z1: -3.3, y: 0, density: 1.4, arrivalBias: -0.2 },
     { id: 'deck-back', kind: 'floor', x0: -11.5, x1: 11.5, z0: -33, z1: -17, y: 0, density: 0.7, arrivalBias: 0.05 },
     { id: 'lounge', kind: 'lounge', x0: -14, x1: -11.8, z0: -30, z1: -22, y: 0, density: 0.3, minLod: 1, arrivalBias: 0.3, facing: 0.3 },
   );
-  crowdBarrier(ctx, root, 12, -3.1);
-  boothSpeakers(ctx, root, 3.3, -2.9);
+  crowdBarrier(ctx, root, 12, -2.95);
+  boothSpeakers(ctx, root, 4.0, -1.2);
+  addCloseCrowd(ctx);
   frontOfStage(ctx, root, -2.5);
   return {
     root, bounds: { x0: -10, x1: 10, z0: -7, z1: -31, wallZ: zB + 1, wallY: 5, ceilY: 20 },
@@ -466,8 +470,9 @@ function buildFestival(ctx: BuildContext): VenueBuild {
     root.add(at(cyl(0.2, 0.2, 6, m.blackMetal(), 5), x, 3, z));
     root.add(at(new THREE.Mesh(new THREE.SphereGeometry(0.5, 6, 4), m.emissive('towerlamp', '#ffd7a0', 2)), x, 6.2, z));
   }
-  crowdBarrier(ctx, root, 14, -3.1);
-  boothSpeakers(ctx, root, 3.6, -3.0);
+  crowdBarrier(ctx, root, 14, -2.95);
+  boothSpeakers(ctx, root, 4.0, -1.2);
+  addCloseCrowd(ctx);
   frontOfStage(ctx, root, -2.5);
 
   const sky = new THREE.Mesh(
@@ -480,7 +485,7 @@ function buildFestival(ctx: BuildContext): VenueBuild {
   );
   sky.userData.dynamic = true;
   ctx.crowdRegions.push(
-    { id: 'field-front', kind: 'floor', x0: -26, x1: 26, z0: -26, z1: -4.2, y: 0, density: 1.1 },
+    { id: 'field-front', kind: 'floor', x0: -26, x1: 26, z0: -26, z1: -3.3, y: 0, density: 1.3, arrivalBias: -0.2 },
     { id: 'field-mid', kind: 'floor', x0: -34, x1: 34, z0: -52, z1: -26, y: 0, density: 0.7, arrivalBias: 0.05 },
     { id: 'field-back', kind: 'floor', x0: -36, x1: 36, z0: -66, z1: -52, y: 0, density: 0.5, arrivalBias: 0.1 },
   );
