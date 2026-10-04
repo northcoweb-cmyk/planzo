@@ -1,5 +1,5 @@
 export type VenueId = 'DC_NIGHT' | 'WAREHOUSE' | 'UNDERGROUND' | 'ROOFTOP' | 'FESTIVAL';
-export type AudioInputKind = 'system' | 'mic' | 'line' | 'demo' | 'file' | 'manual';
+export type AudioInputKind = 'system' | 'mic' | 'line' | 'demo' | 'file' | 'manual' | 'midi';
 export type QualityId = 'LOW' | 'MEDIUM' | 'HIGH' | 'ULTRA';
 export type LightingModeId = 'CALM' | 'HOUSE' | 'PEAK' | 'DROP' | 'BREAKDOWN' | 'AFTERHOURS';
 export type LightingOverride = 'AUTO' | LightingModeId;

@@ -1,6 +1,7 @@
 import './ui.css';
 import type { Settings, SettingsManager } from '../core/Settings';
 import type { AudioInputKind, CrowdFrame, LightingOverride, QualityId, VenueId } from '../core/types';
+import { MidiEngine, MIDI_TARGETS } from '../audio/MidiEngine';
 import { AudioEngine, type AudioDebug, type ConnectResult, type DeviceInfo } from '../audio/AudioEngine';
 import { VENUES, VENUE_ORDER } from '../scene/venues/venues';
 import { formatDuration, type SessionStats } from '../engine/SessionManager';
@@ -29,12 +30,14 @@ const ICONS: Record<AudioInputKind, string> = {
   mic: '<svg viewBox="0 0 24 24"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg>',
   demo: '<svg viewBox="0 0 24 24"><path d="M5 18V8l9-3v10"/><circle cx="5" cy="18" r="2"/><circle cx="14" cy="15" r="2"/></svg>',
   file: '<svg viewBox="0 0 24 24"><path d="M6 3h8l4 4v14H6z"/><path d="M14 3v4h4M9 14l3-3 3 3M12 11v7"/></svg>',
+  midi: '<svg viewBox="0 0 24 24"><rect x="3" y="6" width="18" height="12" rx="2"/><circle cx="8" cy="12" r="2.2"/><circle cx="16" cy="12" r="2.2"/><path d="M12 8v8"/></svg>',
   manual: '<svg viewBox="0 0 24 24"><path d="M7 21V9a2 2 0 0 1 4 0v5l7 1v6"/><path d="M13 5.5a3 3 0 0 1 5 2"/></svg>',
 };
 
 const AUDIO_OPTIONS: { kind: AudioInputKind; title: string; desc: string; badge?: string }[] = [
   { kind: 'system', title: 'System audio', desc: 'Listens to what your computer is playing — Serato, Spotify, anything.', badge: 'Recommended' },
   { kind: 'line', title: 'Line in / virtual cable', desc: 'Pick an audio input: a sound card, or a loopback device like VB-Cable / BlackHole.' },
+  { kind: 'midi', title: 'DJ controller (MIDI)', desc: 'Reads your Numark Party Mix 2 directly: faders, EQ, crossfader, pads. No audio needed.', badge: 'Direct' },
   { kind: 'mic', title: 'Microphone', desc: 'Hears your speakers through the mic. Works anywhere, least precise.' },
   { kind: 'demo', title: 'Built-in demo set', desc: 'A synthesised house track with builds and drops, to try the club right now.' },
   { kind: 'file', title: 'Audio file', desc: 'Play an MP3/WAV/AAC from your computer through the club.' },
@@ -80,12 +83,19 @@ export class UI {
   private qualityRec!: HTMLElement;
   private statEls: Record<string, HTMLElement> = {};
   private simBtn!: HTMLButtonElement;
+  private midiSelects: HTMLSelectElement[] = [];
+  private launcherMidiRow!: HTMLElement;
+  private midiPanel!: HTMLElement;
+  private midiMonitor!: HTMLElement;
+  private midiBound: Record<string, HTMLElement> = {};
+  private midiPopulated = false;
 
   constructor(
     private readonly rootEl: HTMLElement,
     private readonly settings: SettingsManager,
     private readonly hooks: UIHooks,
     private readonly audio: AudioEngine,
+    private readonly midi: MidiEngine,
   ) {
     this.root = rootEl;
     this.buildLauncher();
@@ -148,6 +158,16 @@ export class UI {
     refreshDev.onclick = () => void this.populateDevices(true);
     this.launcherDeviceRow.append(devField, refreshDev);
     s2.appendChild(this.launcherDeviceRow);
+    this.launcherMidiRow = el('div', { class: 'audio-extra' });
+    const mf = el('div', { class: 'field' }, '<label>MIDI controller</label>');
+    const msel = el('select');
+    msel.onchange = () => this.settings.set({ midiDeviceId: msel.value });
+    mf.appendChild(msel);
+    this.midiSelects.push(msel);
+    const mref = el('button', { class: 'btn ghost', type: 'button' }, 'Find controllers');
+    mref.onclick = () => void this.populateMidi();
+    this.launcherMidiRow.append(mf, mref);
+    s2.appendChild(this.launcherMidiRow);
     this.launcherFileRow = el('div', { class: 'audio-extra' });
     this.fileInput = el('input', { type: 'file', accept: 'audio/*' });
     this.fileInput.onchange = () => { this.pickedFile = this.fileInput!.files?.[0]; };
@@ -217,6 +237,9 @@ export class UI {
     note.className = 'audio-note';
     this.launcherDeviceRow.classList.toggle('hidden', !(kind === 'line' || kind === 'mic'));
     this.launcherFileRow.classList.toggle('hidden', kind !== 'file');
+    this.launcherMidiRow.classList.toggle('hidden', kind !== 'midi');
+    if (kind === 'midi' && !this.midiPopulated) void this.populateMidi();
+    this.midiPanel?.classList.toggle('hidden', kind !== 'midi');
     switch (kind) {
       case 'system': {
         const hint = AudioEngine.platformHint();
@@ -226,10 +249,29 @@ export class UI {
         break;
       }
       case 'line': note.innerHTML = 'Choose the input your music arrives on. For Serato on the same computer use a <b>virtual audio cable</b> (VB-Cable, BlackHole, Loopback) or a sound card with a loopback/line-in. ECHO never plays this input back, so there is no feedback.'; break;
+      case 'midi':
+        note.classList.add('warn');
+        note.innerHTML = MidiEngine.supported()
+          ? '<b>Reads the controller\'s faders, EQ, crossfader and pads (read-only — nothing is sent to it).</b> It hears <i>what you do</i>, not the sound: pull the bass EQ out and the crowd settles, bring it back and they erupt; hit a pad and they cheer. Set the tempo with <span class="kbd">T</span>. <b>Windows caveat:</b> if Serato has the controller open, the browser may receive nothing — the monitor in Settings → Audio will show that. In that case use System audio or a virtual cable.'
+          : '<b>This browser has no Web MIDI.</b> Use Chrome or Edge, or pick an audio input.';
+        if (!MidiEngine.supported()) note.classList.add('bad');
+        break;
       case 'mic': note.classList.add('warn'); note.innerHTML = 'The microphone hears your room speakers. Keep it away from the speakers if you hear a screech, and lower the volume a little. Level auto-adjusts.'; break;
       case 'demo': note.innerHTML = 'Plays a built-in 124&nbsp;BPM house arrangement (groove → breakdown → build → drop) through your speakers and analyses it exactly like any other input.'; break;
       case 'file': note.innerHTML = 'Loads a local audio file, plays it (looping) and analyses it live.'; break;
       case 'manual': note.classList.add('warn'); note.innerHTML = 'Manual performance mode. Tap <span class="kbd">T</span> in time with your music, set a BPM, and use <span class="kbd">B</span> (build) and <span class="kbd">D</span> (drop). <span class="kbd">↑</span>/<span class="kbd">↓</span> raise and lower the crowd.'; break;
+    }
+  }
+
+  private async populateMidi(): Promise<void> {
+    this.midiPopulated = true;
+    const devs = await this.midi.listDevices();
+    for (const sel of this.midiSelects) {
+      const cur = this.settings.get().midiDeviceId;
+      sel.innerHTML = '';
+      sel.appendChild(el('option', { value: '' }, devs.length ? 'Auto (Numark / all)' : 'No MIDI controllers found'));
+      for (const d of devs) sel.appendChild(el('option', { value: d.id }, d.name));
+      sel.value = devs.some((d) => d.id === cur) ? cur : '';
     }
   }
 
@@ -466,6 +508,40 @@ export class UI {
       tap.onclick = () => this.hooks.tap();
       btns.append(rc, tap);
       p.appendChild(btns);
+      this.midiPanel = el('div', { class: 'midi-panel' });
+      this.midiPanel.appendChild(el('div', { class: 'sec' }, 'Controller mapping'));
+      const mrow = el('div', { class: 'row' }, '<div class="top"><label>Controller</label></div>');
+      const msel2 = el('select');
+      msel2.onchange = () => this.settings.set({ midiDeviceId: msel2.value });
+      this.midiSelects.push(msel2);
+      mrow.appendChild(msel2);
+      this.midiPanel.appendChild(mrow);
+      this.midiMonitor = el('div', { class: 'status-pill' }, '<i></i><span>No messages yet — move a fader</span>');
+      this.midiPanel.appendChild(this.midiMonitor);
+      this.midiPanel.appendChild(el('small', { style: 'display:block;margin:0 0 12px;color:var(--text-faint);font-size:11.5px;line-height:1.5' }, 'Press Learn, then move that control once. Faders, crossfader and bass EQ are enough; play buttons are optional. Any other button or pad makes the crowd cheer.'));
+      for (const t of MIDI_TARGETS) {
+        const r = el('div', { class: 'row', style: 'display:flex;align-items:center;gap:10px;margin-bottom:8px' });
+        const lab = el('span', { style: 'flex:1;font-size:12px;color:var(--text-dim)' }, t.label);
+        const bound = el('output', { style: 'font:11px var(--mono);color:var(--text-faint);min-width:74px;text-align:right' });
+        this.midiBound[t.id] = bound;
+        const b = el('button', { class: 'btn ghost', type: 'button', style: 'padding:6px 10px' }, 'Learn');
+        b.onclick = () => {
+          if (this.midi.learning === t.id) { this.midi.cancelLearn(); b.textContent = 'Learn'; return; }
+          this.midi.startLearn(t.id);
+          b.textContent = 'Move it…';
+          this.notice(t.hint, false, 3000);
+          this.midi.onLearned = (id) => { this.midiRefreshBound(); (this.midiBound[id].parentElement!.querySelector('button') as HTMLButtonElement).textContent = 'Learn'; };
+        };
+        r.append(lab, bound, b);
+        this.midiPanel.appendChild(r);
+      }
+      const clr = el('button', { class: 'btn ghost', type: 'button' }, 'Clear mapping');
+      clr.onclick = () => { this.midi.clearMap(); this.midiRefreshBound(); };
+      const reconnect = el('div', { class: 'btn-row' });
+      reconnect.appendChild(clr);
+      this.midiPanel.appendChild(reconnect);
+      p.appendChild(this.midiPanel);
+      this.midiRefreshBound();
       toggle(p, 'Monitor input through speakers', 'monitorAudio', 'Only for line-in/mic testing. Leave off to avoid feedback.');
       p.appendChild(el('div', { class: 'sec' }, 'Tempo & sensitivity'));
       slider(p, 'Manual BPM', 'bpm', 70, 180, 1, (v) => `${v}`, 'Used in Manual mode and as a fallback if the tempo can\'t be detected. Tap beat overrides it.');
@@ -577,7 +653,21 @@ export class UI {
   }
   get settingsOpen(): boolean { return this.drawer.classList.contains('open'); }
 
+  private midiRefreshBound(): void {
+    for (const t of MIDI_TARGETS) {
+      const b = this.midi.map[t.id];
+      this.midiBound[t.id].textContent = b ? `${b.kind === 'cc' ? 'CC' : 'Note'} ${b.num}` : '—';
+    }
+  }
+
   updateSession(stats: SessionStats): void {
+    if (this.settingsOpen && this.midi.connected && this.midiMonitor) {
+      const got = this.midi.hasActivity;
+      this.midiMonitor.className = `status-pill ${got ? 'live' : ''}`;
+      this.midiMonitor.querySelector('span')!.textContent = got
+        ? `${this.midi.lastMessage}`
+        : this.midi.idleSeconds > 4 ? 'Nothing received — Serato may own the controller. Close/disable it there, or use audio.' : 'Waiting for a message — move a fader…';
+    }
     if (!this.settingsOpen) return;
     const S = this.statEls;
     S.dur.textContent = formatDuration(stats.durationSec);

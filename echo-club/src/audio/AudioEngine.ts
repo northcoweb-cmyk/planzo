@@ -133,6 +133,12 @@ export class AudioEngine {
     this.kind = kind;
     this.beats.reset();
     this.analyzer.reset();
+    if (kind === 'midi') {
+      this.status = 'idle';
+      this.label = 'Controller (MIDI)';
+      this.message = 'Controller mode — connected by the app.';
+      return { ok: true, message: this.message };
+    }
     if (kind === 'manual') {
       this.status = 'idle';
       this.label = 'Manual performance mode';
@@ -229,7 +235,16 @@ export class AudioEngine {
   private attachStream(stream: MediaStream, ctx: AudioContext, analyser: AnalyserNode): void {
     this.stream = stream;
     const src = ctx.createMediaStreamSource(stream);
-    src.connect(analyser); // NOT connected to destination — avoids feedback loops
+    if (this.kind === 'mic') {
+      // A mic hearing speakers across a room is very quiet: boost before analysis and accept a lower floor.
+      const boost = ctx.createGain();
+      boost.gain.value = 8;
+      src.connect(boost).connect(analyser);
+      this.analyzer.silenceThreshold = 0.0008;
+    } else {
+      src.connect(analyser); // NOT connected to destination — avoids feedback loops
+      this.analyzer.silenceThreshold = 0.0025;
+    }
     this.source = src;
     const track = stream.getAudioTracks()[0];
     track.addEventListener('ended', () => {

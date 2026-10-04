@@ -3,6 +3,7 @@ import { SettingsManager } from './core/Settings';
 import { QUALITY } from './core/Quality';
 import type { CrowdFrame, QualityId } from './core/types';
 import { AudioEngine, type ConnectResult } from './audio/AudioEngine';
+import { MidiEngine } from './audio/MidiEngine';
 import { EnergyEngine } from './engine/EnergyEngine';
 import { SessionManager } from './engine/SessionManager';
 import { CrowdManager } from './crowd/CrowdManager';
@@ -24,6 +25,7 @@ const STATE_LABEL: Record<string, string> = {
 class ClubApp {
   readonly settings = new SettingsManager();
   readonly audio = new AudioEngine();
+  readonly midi = new MidiEngine();
   readonly energy = new EnergyEngine();
   readonly session = new SessionManager();
   readonly crowd = new CrowdManager();
@@ -88,7 +90,7 @@ class ClubApp {
       fullscreen: () => this.toggleFullscreen(),
       endSession: () => this.endSession(),
       listDevices: () => this.audio.listDevices(),
-    }, this.audio);
+    }, this.audio, this.midi);
 
     this.session.onReaction = (r) => this.ui.reaction(r.score, r.label);
     this.audio.endedHandler = () => {
@@ -154,6 +156,17 @@ class ClubApp {
   private async connectAudio(file?: File): Promise<ConnectResult> {
     const s = this.settings.get();
     this.audio.setBeatSensitivity(s.beatSensitivity / 100);
+    if (s.audioInput === 'midi') {
+      this.audio.disconnect();
+      const r = await this.midi.connect(s.midiDeviceId || undefined);
+      this.ui.setAudioStatus(r.ok ? 'live' : 'error', r.ok ? `Controller · ${this.midi.deviceName}` : r.message);
+      if (r.ok) {
+        this.energy.clock.clearTap();
+        this.ui.notice('Controller mode: press TAP (T) in time with your music to set the tempo, and map your controls in Settings → Audio.', false, 8000);
+      }
+      return { ok: r.ok, message: r.message };
+    }
+    this.midi.disconnect();
     const res = await this.audio.connect(s.audioInput, { deviceId: s.audioDeviceId || undefined, file, monitor: s.monitorAudio });
     this.ui.setAudioStatus(res.ok ? (this.audio.isLive ? 'live' : 'idle') : 'error', res.ok ? (this.audio.isLive ? `Live · ${this.audio.label}` : this.audio.label) : res.message);
     if (res.ok) {
@@ -325,8 +338,12 @@ class ClubApp {
     if (this.running && this.simRunning) {
       const dt = Math.min(this.maxDt, rawDt);
       this.simTime += dt;
-      const features = this.audio.update(real);
-      const live = this.audio.isLive;
+      const midiOn = this.midi.connected && s.audioInput === 'midi';
+      const features = midiOn
+        ? this.midi.features(dt, this.energy.clock.bpm, this.energy.clock.tick, this.energy.clock.beatInBar)
+        : this.audio.update(real);
+      const live = midiOn || this.audio.isLive;
+      if (midiOn) { const h = this.midi.consumeHits(); if (h > 0) this.energy.bump(Math.min(h, 3)); }
       this.frame = this.energy.update(dt, this.simTime, features, live, s);
       const f = this.frame;
       if (f.events.drop) { this.lastDropAt = this.simTime; this.debug.lastDropAt = this.simTime; }
@@ -344,7 +361,7 @@ class ClubApp {
       this.scene.setGrade(real, f.dropIntensity * 0.0035, 0.5);
 
       this.ui.updateHud(f, {
-        input: live ? this.audio.label.toUpperCase() : s.audioInput === 'manual' ? 'MANUAL' : 'NO SIGNAL',
+        input: midiOn ? 'CONTROLLER' : live ? this.audio.label.toUpperCase() : s.audioInput === 'manual' ? 'MANUAL' : 'NO SIGNAL',
         live, manual: !live, people: this.crowd.count, attendance: this.session.stats.attendance, stateLabel: STATE_LABEL[f.state],
       }, real);
       this.ui.updateSession(this.session.stats);

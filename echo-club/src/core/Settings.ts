@@ -6,6 +6,7 @@ export interface Settings {
   venue: VenueId;
   audioInput: AudioInputKind;
   audioDeviceId: string;
+  midiDeviceId: string;
   /** Manual / fallback BPM. 0 = auto-detect when audio is live. */
   bpm: number;
   sensitivity: number; // 0..100
@@ -35,6 +36,7 @@ export const DEFAULT_SETTINGS: Settings = {
   venue: 'DC_NIGHT',
   audioInput: 'system',
   audioDeviceId: '',
+  midiDeviceId: '',
   bpm: 124,
   sensitivity: 55,
   beatSensitivity: 55,

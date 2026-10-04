@@ -30,6 +30,7 @@ export class EnergyEngine {
   private buildBoost = 0;
   private bassSmooth = 0;
   private highSmooth = 0;
+  private impulse = 0;
   private lastFrame!: CrowdFrame;
   /** Reset-friendly session clock for deterministic tests. */
   private t0 = 0;
@@ -64,6 +65,11 @@ export class EnergyEngine {
   crowdHype(now: number): void {
     this.mood = 'hype';
     this.moodUntil = now + MOOD_SECONDS;
+  }
+  /** A pad / button hit on the controller: the crowd reacts immediately and briefly. */
+  bump(n = 1): void {
+    this.impulse = Math.min(30, this.impulse + 9 * n);
+    this.clock.kick = 1;
   }
   tap(now: number): number {
     return this.clock.tap(now);
@@ -162,7 +168,8 @@ export class EnergyEngine {
     } else {
       target = 46 + bias;
     }
-    target += build * 20;
+    this.impulse *= Math.exp(-dt / 2.2);
+    target += build * 20 + this.impulse;
     if (breakdown && !manualBuild) target = Math.min(target, 34);
     if (this.mood === 'calm') target = Math.min(target, 22);
     if (this.mood === 'hype') target = Math.max(target, 72) + 8;

@@ -38,6 +38,7 @@ cool-downs and recent-drop memory). Pick one input:
 |---|---|---|
 | **System audio** | Captures what your computer is playing (`getDisplayMedia`). | Chrome/Edge on **Windows**: choose *Entire screen* and tick *Also share system audio*. Follows the Windows default output, so if Serato plays to the controller's own sound device, make that the default output or use a virtual cable. **macOS only shares tab audio** → use *Line in* with BlackHole/Loopback. Firefox/Safari can't share system audio. |
 | **Line in / virtual cable** | Any audio input device (sound card line-in, VB-Cable, BlackHole, Loopback…). | Raw, unprocessed capture; never played back (no feedback). |
+| **DJ controller (MIDI)** | Reads the Party Mix 2 over Web MIDI (read-only). Faders/crossfader set how loud the room is, **bass EQ kill = breakdown, bass back = drop**, pads/buttons make the crowd cheer. Map controls once with *Learn* in Settings → Audio; tempo via Tap (`T`) or the BPM setting. | Chrome/Edge only. On Windows, if Serato already holds the controller the browser may receive nothing — the monitor shows this; use System audio or a virtual cable instead. |
 | **Microphone** | Hears your speakers. | Works anywhere; least precise. |
 | **Demo set** | Built-in synthesised 124 BPM house track with builds and drops. | Real audio through the real pipeline — good for testing without any gear. |
 | **Audio file** | Plays + analyses a local file. | |
