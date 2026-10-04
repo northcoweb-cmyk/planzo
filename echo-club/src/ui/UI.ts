@@ -22,6 +22,8 @@ export interface UIHooks {
   fullscreen(): void;
   endSession(): void;
   listDevices(): Promise<DeviceInfo[]>;
+  calibrate(): Promise<string>;
+  midiAttach(): Promise<void>;
 }
 
 const ICONS: Record<AudioInputKind, string> = {
@@ -90,6 +92,12 @@ export class UI {
   private midiBound: Record<string, HTMLElement> = {};
   private midiPopulated = false;
   private backupPills: HTMLElement[] = [];
+  private midiConnPill: HTMLElement | null = null;
+  private midiWizardPrompt!: HTMLElement;
+  private wizSkip!: HTMLElement;
+  private wizSkipGroup!: HTMLElement;
+  private wizStop!: HTMLElement;
+  private wiz: { list: typeof MIDI_TARGETS; i: number } | null = null;
   private backupSelects: HTMLSelectElement[] = [];
 
   constructor(
@@ -219,7 +227,12 @@ export class UI {
     bkBox.onchange = () => { this.settings.set({ backupMic: bkBox.checked }); if (bkBox.checked) void this.populateDevices(true); };
     bkLabel.append(bkBox, document.createTextNode('Headset mic as backup'));
     this.refreshers.push(() => { bkBox.checked = this.settings.get().backupMic; });
-    foot.append(start, fsLabel, bkLabel, el('span', { class: 'hint-line' }, 'Tip: drag this window to your left monitor, then press <span class="kbd">F</span>'));
+    const mdLabel = el('label', { class: 'check', title: 'Mirrors your faders/knobs/pads on the on-screen board and hypes the crowd when you work the mix' });
+    const mdBox = el('input', { type: 'checkbox', checked: s.midiLayer });
+    mdBox.onchange = () => this.settings.set({ midiLayer: mdBox.checked });
+    mdLabel.append(mdBox, document.createTextNode('Read my DJ controller'));
+    this.refreshers.push(() => { mdBox.checked = this.settings.get().midiLayer; });
+    foot.append(start, fsLabel, bkLabel, mdLabel, el('span', { class: 'hint-line' }, 'Tip: drag this window to your left monitor, then press <span class="kbd">F</span>'));
     card.appendChild(foot);
     card.appendChild(el('div', { id: 'start-error' }));
 
@@ -246,7 +259,6 @@ export class UI {
     this.launcherFileRow.classList.toggle('hidden', kind !== 'file');
     this.launcherMidiRow.classList.toggle('hidden', kind !== 'midi');
     if (kind === 'midi' && !this.midiPopulated) void this.populateMidi();
-    this.midiPanel?.classList.toggle('hidden', kind !== 'midi');
     switch (kind) {
       case 'system': {
         const hint = AudioEngine.platformHint();
@@ -431,8 +443,11 @@ export class UI {
     const time = new Date().toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
     if (time !== this.lastClock) { this.lastClock = time; this.els.clock.textContent = time; }
     const dot = info.live ? 'live' : info.manual ? 'manual' : '';
+    const waiting = info.live && f.musicActive < 0.3;
+    const bpmTxt = waiting ? '— BPM' : `${Math.round(f.bpm)} BPM`;
+    const stateTxt = waiting ? 'WAITING FOR MUSIC' : info.stateLabel;
     this.els.status.innerHTML =
-      `<i class="dot ${dot}"></i>${info.input}<span class="sep">|</span>${Math.round(f.bpm)} BPM<span class="sep">|</span>${info.stateLabel}<span class="sep">|</span>${info.attendance.toLocaleString()} IN THE ROOM`;
+      `<i class="dot ${dot}"></i>${info.input}<span class="sep">|</span>${bpmTxt}<span class="sep">|</span>${stateTxt}<span class="sep">|</span>${info.attendance.toLocaleString()} IN THE ROOM`;
   }
 
   // ======================================================================== settings drawer
@@ -522,38 +537,74 @@ export class UI {
       tap.onclick = () => this.hooks.tap();
       btns.append(rc, tap);
       p.appendChild(btns);
+      // ---- microphone level / noise gate
+      p.appendChild(el('div', { class: 'sec' }, 'Microphone level & noise gate'));
+      const meter = el('div', { class: 'row' });
+      meter.innerHTML = '<div class="top"><label>Mic level</label><output id="mic-db">– dB</output></div><div style="position:relative;height:8px;background:rgba(255,255,255,0.1);border-radius:4px;overflow:hidden"><i id="mic-bar" style="display:block;height:100%;width:0;background:var(--accent)"></i><i id="mic-gate" style="position:absolute;top:0;bottom:0;width:2px;background:var(--warn);left:50%"></i></div><small>The orange line is the noise gate. Music must be louder than it to count — room noise stays below it so the crowd stays quiet in silence.</small>';
+      p.appendChild(meter);
+      slider(p, 'Noise gate', 'micGateDb', -75, -25, 1, (v) => `${v} dB`, 'Raise it if the crowd moves with no music; lower it if the crowd ignores quiet music.');
+      const cal = el('div', { class: 'btn-row' });
+      const calBtn = el('button', { class: 'btn', type: 'button' }, 'Calibrate to my room');
+      calBtn.onclick = async () => {
+        calBtn.textContent = 'Listening… keep music OFF';
+        const msg = await this.hooks.calibrate();
+        calBtn.textContent = 'Calibrate to my room';
+        this.notice(msg, false, 7000);
+      };
+      cal.appendChild(calBtn);
+      p.appendChild(cal);
+      slider(p, 'Beat sync offset', 'beatOffsetMs', -150, 150, 5, (v) => `${v > 0 ? '+' : ''}${v} ms`, 'If lights / arms hit slightly early or late, nudge this. Positive = later.');
+
+      // ---- DJ controller (MIDI) — works next to ANY audio input
+      p.appendChild(el('div', { class: 'sec' }, 'DJ controller (Numark Party Mix 2)'));
+      toggle(p, 'Read my DJ controller', 'midiLayer', 'Runs alongside the mic / system audio. The on-screen board mirrors your faders, knobs, jogs and pads; moving the crossfader or filter hypes the crowd; a silent mixer means a silent room.');
       this.midiPanel = el('div', { class: 'midi-panel' });
-      this.midiPanel.appendChild(el('div', { class: 'sec' }, 'Controller mapping'));
       const mrow = el('div', { class: 'row' }, '<div class="top"><label>Controller</label></div>');
       const msel2 = el('select');
       msel2.onchange = () => this.settings.set({ midiDeviceId: msel2.value });
       this.midiSelects.push(msel2);
       mrow.appendChild(msel2);
       this.midiPanel.appendChild(mrow);
+      this.midiConnPill = el('div', { class: 'status-pill' }, '<i></i><span>Not connected</span>');
+      this.midiPanel.appendChild(this.midiConnPill);
       this.midiMonitor = el('div', { class: 'status-pill' }, '<i></i><span>No messages yet — move a fader</span>');
       this.midiPanel.appendChild(this.midiMonitor);
-      this.midiPanel.appendChild(el('small', { style: 'display:block;margin:0 0 12px;color:var(--text-faint);font-size:11.5px;line-height:1.5' }, 'Press Learn, then move that control once. Faders, crossfader and bass EQ are enough; play buttons are optional. Any other button or pad makes the crowd cheer.'));
+      const wizBox = el('div', { class: 'audio-note', style: 'margin:10px 0' });
+      wizBox.innerHTML = '<b>Guided setup.</b> ECHO asks you to move one control at a time and remembers it. Do <i>Quick setup</i> first (crossfader, faders, bass knobs); the rest is optional.';
+      this.midiWizardPrompt = el('div', { style: 'margin-top:8px;font-size:13px;color:var(--text)' });
+      wizBox.appendChild(this.midiWizardPrompt);
+      this.midiPanel.appendChild(wizBox);
+      const wb = el('div', { class: 'btn-row' });
+      const mkb = (label: string, fn: () => void, ghost = false) => { const b = el('button', { class: 'btn' + (ghost ? ' ghost' : ''), type: 'button' }, label); b.onclick = fn; wb.appendChild(b); return b; };
+      mkb('Quick setup', () => void this.startWizard(['essential']));
+      mkb('Full setup', () => void this.startWizard(['essential', 'deck', 'pads', 'actions']));
+      mkb('Pads only', () => void this.startWizard(['pads']), true);
+      this.midiPanel.appendChild(wb);
+      const wb2 = el('div', { class: 'btn-row' });
+      this.wizSkip = el('button', { class: 'btn ghost hidden', type: 'button' }, 'Skip this control');
+      this.wizSkip.onclick = () => this.wizardNext(false);
+      this.wizSkipGroup = el('button', { class: 'btn ghost hidden', type: 'button' }, 'Skip section');
+      this.wizSkipGroup.onclick = () => this.wizardSkipGroup();
+      this.wizStop = el('button', { class: 'btn ghost hidden', type: 'button' }, 'Stop');
+      this.wizStop.onclick = () => this.wizardStop();
+      wb2.append(this.wizSkip, this.wizSkipGroup, this.wizStop);
+      this.midiPanel.appendChild(wb2);
+      const det = el('details', { class: 'help' });
+      det.appendChild(el('summary', {}, 'All mapped controls'));
       for (const t of MIDI_TARGETS) {
-        const r = el('div', { class: 'row', style: 'display:flex;align-items:center;gap:10px;margin-bottom:8px' });
+        const r = el('div', { style: 'display:flex;align-items:center;gap:8px;margin:6px 0' });
         const lab = el('span', { style: 'flex:1;font-size:12px;color:var(--text-dim)' }, t.label);
-        const bound = el('output', { style: 'font:11px var(--mono);color:var(--text-faint);min-width:74px;text-align:right' });
+        const bound = el('output', { style: 'font:11px var(--mono);color:var(--text-faint);min-width:64px;text-align:right' });
         this.midiBound[t.id] = bound;
-        const b = el('button', { class: 'btn ghost', type: 'button', style: 'padding:6px 10px' }, 'Learn');
-        b.onclick = () => {
-          if (this.midi.learning === t.id) { this.midi.cancelLearn(); b.textContent = 'Learn'; return; }
-          this.midi.startLearn(t.id);
-          b.textContent = 'Move it…';
-          this.notice(t.hint, false, 3000);
-          this.midi.onLearned = (id) => { this.midiRefreshBound(); (this.midiBound[id].parentElement!.querySelector('button') as HTMLButtonElement).textContent = 'Learn'; };
-        };
+        const b = el('button', { class: 'btn ghost', type: 'button', style: 'padding:4px 9px' }, 'Learn');
+        b.onclick = () => { void this.learnOne(t.id); };
         r.append(lab, bound, b);
-        this.midiPanel.appendChild(r);
+        det.appendChild(r);
       }
-      const clr = el('button', { class: 'btn ghost', type: 'button' }, 'Clear mapping');
-      clr.onclick = () => { this.midi.clearMap(); this.midiRefreshBound(); };
-      const reconnect = el('div', { class: 'btn-row' });
-      reconnect.appendChild(clr);
-      this.midiPanel.appendChild(reconnect);
+      const clr = el('button', { class: 'btn ghost', type: 'button', style: 'margin-top:8px' }, 'Clear all mappings');
+      clr.onclick = () => { this.wizardStop(); this.midi.clearMap(); this.midiRefreshBound(); };
+      det.appendChild(clr);
+      this.midiPanel.appendChild(det);
       p.appendChild(this.midiPanel);
       this.midiRefreshBound();
       p.appendChild(el('div', { class: 'sec' }, 'Backup headset mic'));
@@ -681,8 +732,79 @@ export class UI {
   private midiRefreshBound(): void {
     for (const t of MIDI_TARGETS) {
       const b = this.midi.map[t.id];
-      this.midiBound[t.id].textContent = b ? `${b.kind === 'cc' ? 'CC' : 'Note'} ${b.num}` : '—';
+      const el2 = this.midiBound[t.id];
+      if (el2) el2.textContent = b ? `${b.kind === 'cc' ? 'CC' : 'Note'} ${b.num}` : '—';
     }
+  }
+
+  private async ensureMidi(): Promise<boolean> {
+    if (this.midi.connected) return true;
+    await this.hooks.midiAttach();
+    return this.midi.connected;
+  }
+
+  private async learnOne(id: (typeof MIDI_TARGETS)[number]['id']): Promise<void> {
+    if (!(await this.ensureMidi())) { this.notice('Plug in the controller first (and allow MIDI access).', true); return; }
+    const t = MIDI_TARGETS.find((x) => x.id === id)!;
+    this.notice(t.hint, false, 4000);
+    this.midi.startLearn(id);
+    this.midi.onLearned = () => { this.midiRefreshBound(); this.notice(`${t.label} mapped ✓`, false, 1500); };
+  }
+
+  private async startWizard(groups: string[]): Promise<void> {
+    if (!(await this.ensureMidi())) { this.notice('Plug in the controller first (and allow MIDI access).', true); return; }
+    const list = MIDI_TARGETS.filter((t) => groups.includes(t.group));
+    this.wiz = { list, i: -1 };
+    this.wizSkip.classList.remove('hidden');
+    this.wizSkipGroup.classList.remove('hidden');
+    this.wizStop.classList.remove('hidden');
+    this.wizardNext(true);
+  }
+
+  private wizardNext(advance: boolean): void {
+    const w = this.wiz;
+    if (!w) return;
+    if (advance || w.i < 0) w.i++;
+    else { this.midi.cancelLearn(); w.i++; }
+    if (w.i >= w.list.length) { this.wizardStop(true); return; }
+    const t = w.list[w.i];
+    this.midiWizardPrompt.innerHTML = `<b>${w.i + 1}/${w.list.length}</b> · ${t.hint}`;
+    this.midi.startLearn(t.id);
+    this.midi.onLearned = () => { this.midiRefreshBound(); this.wizardNext(true); };
+  }
+
+  private wizardSkipGroup(): void {
+    const w = this.wiz;
+    if (!w) return;
+    const g = w.list[Math.max(0, w.i)].group;
+    this.midi.cancelLearn();
+    while (w.i < w.list.length && w.list[w.i].group === g) w.i++;
+    w.i--; // wizardNext(true) will advance
+    this.wizardNext(true);
+  }
+
+  private wizardStop(done = false): void {
+    this.midi.cancelLearn();
+    this.wiz = null;
+    this.wizSkip?.classList.add('hidden');
+    this.wizSkipGroup?.classList.add('hidden');
+    this.wizStop?.classList.add('hidden');
+    if (this.midiWizardPrompt) this.midiWizardPrompt.textContent = done ? 'Setup complete ✓ — the board on screen now mirrors your controller.' : '';
+    this.midiRefreshBound();
+  }
+
+  /** Live microphone level + gate marker (Settings → Audio). */
+  setMicMeter(rawDb: number, gateDb: number): void {
+    if (!this.settingsOpen) return;
+    const bar = document.getElementById('mic-bar');
+    const gate = document.getElementById('mic-gate');
+    const out = document.getElementById('mic-db');
+    if (!bar || !gate || !out) return;
+    const pos = (db: number) => `${Math.max(0, Math.min(100, ((db + 80) / 60) * 100))}%`;
+    bar.style.width = pos(rawDb);
+    bar.style.background = rawDb > gateDb ? 'var(--good)' : 'var(--accent)';
+    gate.style.left = pos(gateDb);
+    out.textContent = `${rawDb.toFixed(0)} dB`;
   }
 
   updateSession(stats: SessionStats): void {
@@ -707,6 +829,13 @@ export class UI {
 
   setQualityRecommendation(text: string): void {
     if (this.qualityRec) this.qualityRec.textContent = text;
+  }
+
+  setMidiStatus(ok: boolean, text: string): void {
+    this.midiConnPill?.classList.toggle('live', ok);
+    this.midiConnPill?.classList.toggle('err', !ok);
+    const sp = this.midiConnPill?.querySelector('span');
+    if (sp) sp.textContent = text;
   }
 
   setBackupStatus(status: string, text: string): void {

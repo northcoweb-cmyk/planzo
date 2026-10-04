@@ -203,7 +203,7 @@ export class AudioEngine {
       } else {
         // mic / line: raw, unprocessed capture from the chosen device
         if (!navigator.mediaDevices?.getUserMedia) return this.fail('unsupported', 'This browser has no audio input access.');
-        const raw: MediaTrackConstraints = { echoCancellation: false, noiseSuppression: false, autoGainControl: kind === 'mic', channelCount: 2 };
+        const raw: MediaTrackConstraints = { echoCancellation: false, noiseSuppression: false, autoGainControl: false, channelCount: 2 };
         if (opts.deviceId) raw.deviceId = { exact: opts.deviceId };
         let stream: MediaStream;
         try {
@@ -236,14 +236,15 @@ export class AudioEngine {
     this.stream = stream;
     const src = ctx.createMediaStreamSource(stream);
     if (this.kind === 'mic') {
-      // A mic hearing speakers across a room is very quiet: boost before analysis and accept a lower floor.
+      // A mic hearing speakers across a room is quiet: boost it for analysis. Gating uses the RAW level
+      // (analyzer.inputGain) so room noise is never mistaken for music.
       const boost = ctx.createGain();
-      boost.gain.value = 8;
+      boost.gain.value = 4;
       src.connect(boost).connect(analyser);
-      this.analyzer.silenceThreshold = 0.0008;
+      this.analyzer.inputGain = 4;
     } else {
       src.connect(analyser); // NOT connected to destination — avoids feedback loops
-      this.analyzer.silenceThreshold = 0.0025;
+      this.analyzer.inputGain = 1;
     }
     this.source = src;
     const track = stream.getAudioTracks()[0];
@@ -280,6 +281,28 @@ export class AudioEngine {
     this.features = { ...EMPTY };
   }
 
+  /** Noise gate in dBFS (raw input level). */
+  setGate(db: number): void {
+    this.analyzer.gateDb = db;
+  }
+  get rawDb(): number { return this.analyzer.rawDb; }
+
+  private calib: number[] | null = null;
+
+  /** Measure the room for `ms` and set the gate just above it. Call with the music paused. */
+  async calibrate(ms = 2500): Promise<{ ambientDb: number; gateDb: number } | null> {
+    if (this.status !== 'live') return null;
+    this.calib = [];
+    await new Promise((r) => window.setTimeout(r, ms));
+    const v = this.calib;
+    this.calib = null;
+    if (!v.length) return null;
+    const peak = Math.max(...v);
+    const gate = Math.min(-20, Math.max(-75, peak + 7));
+    this.analyzer.gateDb = gate;
+    return { ambientDb: peak, gateDb: gate };
+  }
+
   setBeatSensitivity(v01: number): void {
     this.beats.sensitivity = v01;
   }
@@ -295,6 +318,7 @@ export class AudioEngine {
     this.analyser.getFloatFrequencyData(this.freq);
     this.analyser.getFloatTimeDomainData(this.time);
     const f = this.analyzer.analyse(this.freq, this.time, this.ctx.sampleRate, dt);
+    this.calib?.push(this.analyzer.rawDb);
     const b = this.beats.process(f.fluxLow, f.fluxFull, f.bass, now, f.signal);
     this.onsetHist[this.onsetHead] = b.onset;
     this.onsetHead = (this.onsetHead + 1) % this.onsetHist.length;

@@ -31,6 +31,7 @@ export class EnergyEngine {
   private bassSmooth = 0;
   private highSmooth = 0;
   private impulse = 0;
+  private presence = 0;
   private lastFrame!: CrowdFrame;
   /** Reset-friendly session clock for deterministic tests. */
   private t0 = 0;
@@ -41,6 +42,8 @@ export class EnergyEngine {
 
   reset(): void {
     this.energy = 10;
+    this.presence = 0;
+    this.clock.reset();
     this.musicIntensity = 0;
     this.dropEnv = 0;
     this.buildManual = -1;
@@ -84,7 +87,7 @@ export class EnergyEngine {
     return {
       time: 0, dt: 0, state: 'CALM', stateAge: 0, crowdEnergy: 10, beatStrength: 0, bassEnergy: 0, highFrequencyEnergy: 0, buildIntensity: 0,
       dropIntensity: 0, rhythmIntensity: 0, crowdDensity: 0.75, reactionProbability: 0.2, lightingIntensity: 0.4, bpm: 124, bpmConfidence: 0,
-      beatPhase: 0, beatInBar: 0, beatCount: 0, events: ev, kick: 0, signal: false, dropConfidence: 0, breakdown: false, buildTime: 0,
+      beatPhase: 0, beatInBar: 0, beatCount: 0, musicActive: 0, events: ev, kick: 0, signal: false, dropConfidence: 0, breakdown: false, buildTime: 0,
     };
   }
 
@@ -94,19 +97,29 @@ export class EnergyEngine {
     const manualMode = !audioLive;
     this.structure.dropSensitivity = s.dropSensitivity / 100;
 
+    // ---- presence: is there actually music? (a silent room must not dance) -------------
+    const sigNow = audioLive ? audio.signal : true;
+    this.presence = damp(this.presence, sigNow ? 1 : 0, sigNow ? 6 : 2.5, dt);
+    const active = this.presence > 0.2;
+
     // ---- tempo & beats ---------------------------------------------------------------
     const detected = audioLive && audio.bpm > 0 && audio.bpmConfidence > 0.25;
     const tempo = detected ? audio.bpm : this.clock.tapped || s.bpm || 124;
-    this.clock.update(dt, tempo, audioLive && audio.beat, audioLive && audio.bpmConfidence > 0.3, audio.beatInBar);
+    const useGrid = audioLive && detected && audio.bpmConfidence > 0.3;
+    const onsetStrength = audioLive && audio.beat ? clamp(0.45 + audio.transient * 0.4 + (audio.strongBeat ? 0.3 : 0)) : 0;
+    this.clock.offset = s.beatOffsetMs / 1000;
+    this.clock.update(dt, now, tempo, onsetStrength, useGrid, active);
+    const gridMode = useGrid && this.clock.lockStrength > 0.35 && audio.bassEnv > 0.15;
     const ev: MusicEvents = { beat: false, strongBeat: false, drop: false, dropStrength: 0, dropManual: false, buildStart: false, breakdownStart: false, peakStart: false };
-    if (audioLive) {
-      ev.beat = audio.beat;
-      ev.strongBeat = audio.strongBeat;
+    if (audioLive && !gridMode) {
+      ev.beat = active && audio.beat;
+      ev.strongBeat = active && audio.strongBeat;
     } else {
-      ev.beat = this.clock.tick;
-      ev.strongBeat = this.clock.tick && this.clock.beatInBar === 0;
-      if (ev.beat) this.clock.kick = 1;
+      // stable beat grid (or free-running manual clock): beats land exactly on the grid
+      ev.beat = this.clock.tick && active;
+      ev.strongBeat = ev.beat && this.clock.beatInBar === 0;
     }
+    if (ev.beat) this.clock.kick = 1;
 
     // ---- musical structure -----------------------------------------------------------
     let build = 0;
@@ -156,7 +169,8 @@ export class EnergyEngine {
     const bias = s.crowdEnergy;
     if (audioLive) {
       if (!audio.signal) {
-        target = 6 + Math.max(0, bias) * 0.3;
+        this.musicIntensity = damp(this.musicIntensity, 0, 3, dt);
+        target = 3;
       } else {
         const m = clamp(
           (0.44 * audio.bassEnv + 0.22 * audio.levelEnv + 0.12 * Math.min(1, this.densityOnsets * 2) + 0.12 * audio.highEnv + 0.1 * audio.midEnv) * (0.72 + sens * 0.6),
@@ -186,9 +200,10 @@ export class EnergyEngine {
 
     // Slew-limited energy: it climbs by points-per-second caps, faster during a drop.
     const maxRise = this.dropEnv > 0.45 ? 55 : (this.energy < 30 ? 16 : 11) + build * 6;
-    const maxFall = this.dropEnv > 0.2 ? 6 : 9;
+    const maxFall = audioLive && !audio.signal ? 30 : this.dropEnv > 0.2 ? 6 : 9;
     // A drop makes the room explode within ~1 s (still slew-limited); otherwise energy builds slowly.
-    let next = dampAR(this.energy, target, this.dropEnv > 0.35 ? 0.7 : 3.2, 5.5, dt);
+    const silent = audioLive && !audio.signal;
+    let next = dampAR(this.energy, target, this.dropEnv > 0.35 ? 0.7 : 3.2, silent ? 1.2 : 5.5, dt);
     next = clamp(next, this.energy - maxFall * dt, this.energy + maxRise * dt);
     this.energy = clamp(next, 0, 100);
 
@@ -220,7 +235,8 @@ export class EnergyEngine {
       bpm: this.clock.bpm,
       bpmConfidence: audioLive ? audio.bpmConfidence : 1,
       beatPhase: this.clock.phase,
-      beatInBar: audioLive && audio.bpmConfidence > 0.3 ? audio.beatInBar : this.clock.beatInBar,
+      beatInBar: audioLive && !gridMode && audio.bpmConfidence > 0.3 ? audio.beatInBar : this.clock.beatInBar,
+      musicActive: this.presence,
       beatCount: this.clock.count,
       events: ev,
       kick,

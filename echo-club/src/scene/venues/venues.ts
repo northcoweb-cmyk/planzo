@@ -51,6 +51,12 @@ function pendants(ctx: BuildContext, root: THREE.Group, positions: [number, numb
   }
 }
 
+function washers(ctx: BuildContext, halfW: number, zs: number[], size = 8): void {
+  for (const side of [-1, 1] as const) {
+    for (const z of zs) ctx.fixtures.push({ kind: 'wash', pos: [side * (halfW - 0.15), 0.2, z], side, size });
+  }
+}
+
 /* ------------------------------------------------------------------------------------------ */
 /* DC NIGHT — upscale underground club, dark luxury                                            */
 /* ------------------------------------------------------------------------------------------ */
@@ -130,6 +136,7 @@ function buildDcNight(ctx: BuildContext): VenueBuild {
   for (const x of [-9, -3, 3, 9]) ctx.fixtures.push({ kind: 'back', pos: [x, 0.4, zB + 1.2] });
   pendants(ctx, root, [[-14, 8.6, -6], [14, 8.6, -6], [-14, 8.6, -30], [14, 8.6, -30], [0, 8.8, -33]]);
 
+  washers(ctx, halfW, [-5, -15, -25, -34], 9);
   crowdBarrier(ctx, root, 12, -3.1);
   boothSpeakers(ctx, root);
   frontOfStage(ctx, root, -2.5);
@@ -219,6 +226,7 @@ function buildWarehouse(ctx: BuildContext): VenueBuild {
   }
   for (const x of [-12, -4, 4, 12]) ctx.fixtures.push({ kind: 'back', pos: [x, 0.4, zB + 1.2] });
   pendants(ctx, root, [[-10, 11, -8], [10, 11, -8], [-10, 12, -26], [10, 12, -26]]);
+  washers(ctx, halfW, [-6, -16, -26, -36], 12);
   crowdBarrier(ctx, root, 12, -3.1);
   boothSpeakers(ctx, root, 3.4, -2.9);
   frontOfStage(ctx, root, -2.5);
@@ -261,6 +269,7 @@ function buildUnderground(ctx: BuildContext): VenueBuild {
   ctx.fixtures.push({ kind: 'laser', pos: [-6, 4.4, -5], side: -1 }, { kind: 'laser', pos: [6, 4.4, -5], side: 1 });
   for (const x of [-6, -2, 2, 6]) ctx.fixtures.push({ kind: 'back', pos: [x, 0.4, zB + 1.0] });
   for (const s of [-1, 1]) ctx.fixtures.push({ kind: 'par', pos: [s * 4.8, 1.0, -2.4], side: s });
+  washers(ctx, halfW, [-6, -13, -20], 4.2);
   const bg = bar(ctx, 7);
   bg.rotation.y = Math.PI / 2;
   bg.position.set(-halfW + 1.9, 0, -16);

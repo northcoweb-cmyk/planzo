@@ -44,6 +44,10 @@ cool-downs and recent-drop memory). Pick one input:
 | **Audio file** | Plays + analyses a local file. | |
 | **Manual** | No capture. Tap tempo, set BPM, trigger builds/drops, energy slider. | Always available; used automatically if capture fails or the source ends. |
 
+**DJ controller as a layer.** *Read my DJ controller* (on by default) runs next to any audio input. Run *Settings → Audio → Quick setup* once: move the crossfader, both channel faders and both bass knobs when asked (*Full setup* adds jogs, EQ, filter, play/cue/sync, pads and optional tap/build/drop buttons). Then the on-screen board mirrors the real controller, working the crossfader/filter/EQ hypes the crowd, pads cheer, and a silent mixer (faders down / nothing playing) keeps the room quiet even if the mic hears noise.
+
+**Silence is silence.** The mic is noise-gated on its raw level (Settings → Audio → *Noise gate*, *Calibrate to my room* with the music off). With no music the crowd idles, the board is still, BPM shows "—" and the HUD says WAITING FOR MUSIC. The beat clock learns the beat grid from all detected hits, so arms and lights stay on the beat even when single kicks are missed; *Beat sync offset* nudges it by ±150 ms.
+
 **Backup headset mic.** Tick *Headset mic as backup* (launcher or Settings → Audio) to run a second listener beside any main input. If the main input hears nothing it takes over (HUD shows BACKUP MIC); with the DJ controller it also supplies the tempo/beat, and covers the controller if Serato has locked it.
 
 If something isn't supported ECHO says so in the UI, keeps running, and offers the next-best input.
@@ -98,5 +102,5 @@ Append `?log=1&norender=1` to run the audio/structure pipeline without rendering
 BPM, builds and drops from `window.__echo.debug.log`. `?dtmax=0.3` lifts the simulation step clamp for slow
 machines.
 
-`test/glb-roundtrip.html` (served by `npm run dev` at `/test/glb-roundtrip.html`) exports a small named rig to GLB,
+`test/dsp.html` feeds synthetic room noise → a 124 BPM track → noise through the real analyser/beat/energy code and reports gating and beat-grid accuracy; `test/glb-roundtrip.html` (served by `npm run dev` at `/test/glb-roundtrip.html`) exports a small named rig to GLB,
 re-imports it and runs it through the character converter — a quick check that the GLB path still works.

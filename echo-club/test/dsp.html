@@ -1,0 +1,73 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>DSP check</title></head>
+<body style="background:#111;color:#ddd;font:13px monospace"><pre id="out">running…</pre>
+<script type="module">
+  // Dev-only: feeds synthetic audio (room noise → 124 BPM kick/hat track → noise) through the real
+  // AudioAnalyzer + BeatDetector + EnergyEngine at 60 fps and reports gating + beat-grid accuracy.
+  import { AudioAnalyzer } from '/src/audio/AudioAnalyzer.ts';
+  import { BeatDetector } from '/src/audio/BeatDetector.ts';
+  import { EnergyEngine } from '/src/engine/EnergyEngine.ts';
+  import { DEFAULT_SETTINGS } from '/src/core/Settings.ts';
+
+  const SR = 44100, N = 2048, BPM = 124, P = 60 / BPM, GAIN = Number(new URLSearchParams(location.search).get('gain') || 4);
+  const NOISE_RMS = Number(new URLSearchParams(location.search).get('noise') || 0.0015); // raw room noise (~ -56 dBFS)
+  const MUSIC_AT = 8, MUSIC_END = 38, TOTAL = 48, KICK_AMP = Number(new URLSearchParams(location.search).get('music') || 0.1);
+  let seed = 1; const rnd = () => { seed = (seed * 16807) % 2147483647; return seed / 2147483647 - 0.5; };
+
+  const total = SR * TOTAL; const sig = new Float32Array(total);
+  for (let i = 0; i < total; i++) sig[i] = rnd() * 2 * NOISE_RMS * Math.sqrt(3);
+  const kickTimes = [];
+  for (let t = MUSIC_AT + 0.13; t < MUSIC_END; t += P) {
+    kickTimes.push(t);
+    const s0 = Math.floor(t * SR);
+    for (let i = 0; i < SR * 0.35; i++) { const tt = i / SR; const f = 50 + 110 * Math.exp(-tt * 28);
+      sig[s0 + i] += KICK_AMP * Math.sin(2 * Math.PI * (50 * tt + (110 / 28) * (1 - Math.exp(-tt * 28)))) * Math.exp(-tt * 9); }
+    const h0 = Math.floor((t + P / 2) * SR);                       // off-beat hat
+    for (let i = 0; i < SR * 0.05; i++) sig[h0 + i] += KICK_AMP * 0.35 * rnd() * 2 * Math.exp(-i / (SR * 0.012));
+  }
+  // FFT
+  function fft(re, im) { const n = re.length; for (let i = 1, j = 0; i < n; i++) { let b = n >> 1; for (; j & b; b >>= 1) j ^= b; j ^= b; if (i < j) { [re[i], re[j]] = [re[j], re[i]]; [im[i], im[j]] = [im[j], im[i]]; } }
+    for (let len = 2; len <= n; len <<= 1) { const ang = -2 * Math.PI / len, wr = Math.cos(ang), wi = Math.sin(ang);
+      for (let i = 0; i < n; i += len) { let cr = 1, ci = 0; for (let k = 0; k < len / 2; k++) { const a = i + k, b = a + len / 2; const xr = re[b] * cr - im[b] * ci, xi = re[b] * ci + im[b] * cr; re[b] = re[a] - xr; im[b] = im[a] - xi; re[a] += xr; im[a] += xi; const t = cr * wr - ci * wi; ci = cr * wi + ci * wr; cr = t; } } } }
+  const win = new Float64Array(N); for (let i = 0; i < N; i++) win[i] = 0.42 - 0.5 * Math.cos(2 * Math.PI * i / N) + 0.08 * Math.cos(4 * Math.PI * i / N);
+
+  const an = new AudioAnalyzer(); an.inputGain = GAIN; an.gateDb = -50;
+  const bd = new BeatDetector(); bd.sensitivity = 0.55;
+  const en = new EnergyEngine();
+  const settings = { ...DEFAULT_SETTINGS };
+  const freq = new Float32Array(N / 2), time = new Float32Array(N);
+  const re = new Float64Array(N), im = new Float64Array(N);
+
+  const rows = []; const beatErr = []; let frames = 0;
+  let noiseSignal = 0, noiseFrames = 0, noiseActive = 0, noiseEnergyMax = 0, noiseBeats = 0, musicSignal = 0, musicFrames = 0, afterSig = 0, afterFrames = 0, afterActive = 0, afterBeats = 0;
+  const dt = 1 / 60;
+  for (let t = N / SR; t < TOTAL; t += dt, frames++) {
+    const end = Math.floor(t * SR);
+    for (let i = 0; i < N; i++) { const v = sig[end - N + i] * GAIN; time[i] = v; re[i] = v * win[i]; im[i] = 0; }
+    fft(re, im);
+    for (let k = 0; k < N / 2; k++) { const mag = Math.hypot(re[k], im[k]) / N; freq[k] = 20 * Math.log10(Math.max(mag, 1e-9)); }
+    const f = an.analyse(freq, time, SR, dt);
+    const b = bd.process(f.fluxLow, f.fluxFull, f.bass, t, f.signal);
+    const feat = { signal: f.signal, level: f.level, rms: f.rms, bass: f.bass, mid: f.mid, high: f.high, bassEnv: f.bassEnv, midEnv: f.midEnv, highEnv: f.highEnv, levelEnv: f.levelEnv,
+      brightness: f.brightness, transient: b.onset, beat: b.beat, strongBeat: b.strong, beatInBar: b.beatInBar, bpm: b.bpm, bpmConfidence: b.confidence };
+    const fr = en.update(dt, t, feat, true, settings);
+    if (t < MUSIC_AT - 0.5) { noiseFrames++; if (f.signal) noiseSignal++; if (fr.musicActive > 0.3) noiseActive++; noiseEnergyMax = Math.max(noiseEnergyMax, fr.crowdEnergy); if (fr.events.beat) noiseBeats++; }
+    else if (t > MUSIC_AT + 1.5 && t < MUSIC_END - 1) { musicFrames++; if (f.signal) musicSignal++; }
+    else if (t > MUSIC_END + 3) { afterFrames++; if (f.signal) afterSig++; if (fr.musicActive > 0.3) afterActive++; if (fr.events.beat) afterBeats++; }
+    if (t > MUSIC_AT + 12 && t < MUSIC_END - 1 && fr.events.beat) {
+      // nearest true kick (+ allow half-period for off-beat ghosts)
+      let best = 9; for (const k of kickTimes) { const d = t - k; if (Math.abs(d) < Math.abs(best)) best = d; }
+      beatErr.push(best * 1000);
+    }
+    if (frames % 120 === 0) rows.push(`${t.toFixed(0).padStart(3)}s sig=${f.signal ? 1 : 0} active=${fr.musicActive.toFixed(2)} bpm=${fr.bpm.toFixed(1)} conf=${b.confidence.toFixed(2)} energy=${fr.crowdEnergy.toFixed(0)} state=${fr.state} rawDb=${an.rawDb.toFixed(0)}`);
+  }
+  beatErr.sort((a, b) => a - b);
+  const med = beatErr.length ? beatErr[Math.floor(beatErr.length / 2)] : NaN;
+  const abs = beatErr.map(Math.abs).sort((a, b) => a - b);
+  const p90 = abs.length ? abs[Math.floor(abs.length * 0.9)] : NaN;
+  const res = { gain: GAIN, noiseDb: (20 * Math.log10(NOISE_RMS)).toFixed(0), noiseFramesWithSignal: `${noiseSignal}/${noiseFrames}`, noiseFramesActive: `${noiseActive}/${noiseFrames}`, noiseMaxEnergy: noiseEnergyMax.toFixed(0), noiseBeats,
+    musicFramesWithSignal: `${musicSignal}/${musicFrames}`, afterFramesWithSignal: `${afterSig}/${afterFrames}`, afterActive: `${afterActive}/${afterFrames}`, afterBeats,
+    beats: beatErr.length, medianErrMs: med.toFixed(0), p90AbsErrMs: p90.toFixed(0) };
+  document.getElementById('out').textContent = rows.join('\n') + '\n' + JSON.stringify(res, null, 1);
+  document.title = 'DONE ' + JSON.stringify(res);
+</script></body></html>

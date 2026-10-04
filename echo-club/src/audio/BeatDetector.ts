@@ -165,7 +165,7 @@ export class BeatDetector {
       // breakdowns produce brief bogus estimates).
       if (Math.abs(est - this.pendingBpm) < 4) this.pendingCount++;
       else { this.pendingBpm = est; this.pendingCount = 1; }
-      if (this.pendingCount >= 4 && conf > 0.4) {
+      if (this.pendingCount >= 10 && conf > 0.5) {
         this.bpm = est;
         this.pendingCount = 0;
       }

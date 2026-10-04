@@ -39,9 +39,15 @@ export class AudioAnalyzer {
   private sm = { bass: 0, mid: 0, high: 0, level: 0, brightness: 0.3 };
   private env = { bass: 0, mid: 0, high: 0, level: 0 };
   private envPeak = { bass: 1e-3, mid: 1e-3, high: 1e-3, level: 1e-3 };
+  /** Gain applied upstream of the analyser (mic boost); gating is done on the *raw* level. */
+  inputGain = 1;
+  /** Noise gate (dBFS, raw level). Music must sit above this to count as a signal. */
+  gateDb = -55;
+  /** Raw input level in dBFS of the latest frame. */
+  rawDb = -100;
+  private gateOpen = false;
+  private gateTimer = 0;
   private silentFor = 0;
-  /** Absolute RMS below which we treat the input as silent. */
-  silenceThreshold = 0.0025;
 
   reset(): void {
     this.prevDb = null;
@@ -50,6 +56,8 @@ export class AudioAnalyzer {
     this.env = { bass: 0, mid: 0, high: 0, level: 0 };
     this.envPeak = { bass: 1e-3, mid: 1e-3, high: 1e-3, level: 1e-3 };
     this.silentFor = 0;
+    this.gateOpen = false;
+    this.gateTimer = 0;
   }
 
   analyse(freqDb: Float32Array, timeData: Float32Array, sampleRate: number, dt: number): SpectralFrame {
@@ -95,9 +103,16 @@ export class AudioAnalyzer {
     const centroid = wTot > 0 ? wSum / wTot : 0;
     const brightnessRaw = clamp(Math.log2(Math.max(centroid, 80) / 80) / Math.log2(6000 / 80));
 
-    // --- Silence tracking
-    if (rms < this.silenceThreshold) this.silentFor += dt; else this.silentFor = 0;
-    const signal = this.silentFor < 1.2;
+    // --- Noise gate with hysteresis: opens after 0.25 s above the gate, closes after 0.9 s below gate-4 dB.
+    this.rawDb = 20 * Math.log10(Math.max(1e-6, rms / this.inputGain));
+    if (this.gateOpen) {
+      if (this.rawDb < this.gateDb - 4) this.gateTimer += dt; else this.gateTimer = 0;
+      if (this.gateTimer > 0.9) { this.gateOpen = false; this.gateTimer = 0; }
+    } else {
+      if (this.rawDb > this.gateDb) this.gateTimer += dt; else this.gateTimer = 0;
+      if (this.gateTimer > 0.25) { this.gateOpen = true; this.gateTimer = 0; }
+    }
+    const signal = this.gateOpen;
 
     // --- Auto-gain: peak followers with slow release (≈ 25 s)
     const rel = Math.exp(-dt / 25);

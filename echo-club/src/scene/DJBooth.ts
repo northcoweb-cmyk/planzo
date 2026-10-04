@@ -3,6 +3,7 @@ import type { MaterialLibrary } from './Materials';
 import { at, box, cyl, rotated, seeded } from './Primitives';
 import { plant } from './architecture/parts';
 import type { BuildContext } from './architecture/BuildContext';
+import type { BoardView } from '../audio/MidiEngine';
 
 export interface BoothParams {
   time: number;
@@ -13,7 +14,8 @@ export interface BoothParams {
   bass: number;
   beatPhase: number;
   beatInBar: number;
-  playing: boolean;
+  /** 0..1 — is there music? Nothing on the board "plays" without it. */
+  music: number;
   drop: number;
   build: number;
   accent: THREE.Color;
@@ -32,15 +34,18 @@ export class DJBooth {
   readonly stageY = 0.8;
   readonly tableTopY = 1.74;
   private readonly jogs: THREE.Group[] = [];
-  private readonly pads: { mat: THREE.MeshBasicMaterial; base: THREE.Color; idx: number }[] = [];
+  private readonly pads: { mat: THREE.MeshBasicMaterial; base: THREE.Color; deck: number; idx: number }[] = [];
   private readonly rings: THREE.MeshBasicMaterial[] = [];
   private readonly meters: { mat: THREE.MeshBasicMaterial; level: number; ch: number }[] = [];
   private readonly faders: THREE.Mesh[] = [];
   private crossfader!: THREE.Mesh;
+  /** knobs[deck][name] */
+  private readonly knobs: Record<string, THREE.Group>[] = [{}, {}];
+  private readonly btns: Record<string, THREE.MeshBasicMaterial>[] = [{}, {}];
+  private spin = [0, 0];
   private readonly underglow: THREE.MeshBasicMaterial;
   private readonly laptopScreen: THREE.MeshBasicMaterial;
   private readonly candle: THREE.MeshBasicMaterial;
-  private jogAngle = [0, 0];
   readonly controllerLight = new THREE.PointLight('#ffb878', 1, 4, 2);
 
   constructor(private readonly ctx: BuildContext) {
@@ -163,25 +168,36 @@ export class DJBooth {
     return t;
   }
 
+  private knob(m: MaterialLibrary, c: THREE.Group, deck: number, name: string, x: number, z: number, r = 0.0085, v = 0.5): void {
+    const g = new THREE.Group();
+    g.userData.keep = true;
+    g.position.set(x, 0.045, z);
+    g.add(cyl(r, r, 0.012, m.plastic(0x30323a, 0.4), 14));
+    const mark = box(0.0022, 0.001, 0.0072, m.emissive('knobmark', '#ffffff', 1), 1);
+    mark.position.set(0, 0.0065, -r * 0.55);
+    g.add(mark);
+    g.rotation.y = (v - 0.5) * Math.PI * 1.5;
+    c.add(g);
+    this.knobs[deck][name] = g;
+  }
+
   private buildController(m: MaterialLibrary): THREE.Group {
     const c = new THREE.Group();
     c.name = 'controller';
     const body = m.plastic(0x16171b, 0.42);
     const top = m.plastic(0x0d0e11, 0.5);
-    const rnd = seeded(3);
 
     c.add(at(box(0.6, 0.032, 0.33, body, 1), 0, 0.016, 0));
     c.add(at(box(0.585, 0.006, 0.315, top, 1), 0, 0.035, 0));
-    // slight bevel highlight on the front lip
     c.add(at(box(0.6, 0.008, 0.012, m.steel(), 1), 0, 0.028, 0.168));
 
-    // jog wheels
-    for (const s of [-1, 1]) {
+    for (let deck = 0; deck < 2; deck++) {
+      const s = deck === 0 ? -1 : 1; // deck A (left) / B (right) as seen by the DJ
       const x = s * 0.185;
       const holder = new THREE.Group();
       holder.position.set(x, 0.038, -0.025);
       holder.add(at(cyl(0.088, 0.088, 0.006, m.steel(), 36), 0, 0.003, 0));
-      const ringMat = m.ownEmissive(PAD_COLORS[s > 0 ? 3 : 0], 1.8);
+      const ringMat = m.ownEmissive(PAD_COLORS[deck ? 3 : 0], 1.2);
       this.rings.push(ringMat);
       const ring = new THREE.Mesh(new THREE.TorusGeometry(0.081, 0.0032, 6, 48), ringMat);
       ring.rotation.x = Math.PI / 2;
@@ -196,51 +212,52 @@ export class DJBooth {
         const a = (i / 24) * Math.PI * 2;
         spin.add(at(rotated(box(0.004, 0.001, 0.012, m.plastic(0x23252b, 0.5), 1), 0, -a, 0), Math.sin(a) * 0.06, 0.0185, -Math.cos(a) * 0.06));
       }
-      spin.traverse((o) => { if ((o as THREE.Mesh).isMesh) o.userData.dynamic = true; });
       spin.userData.keep = true;
       holder.add(spin);
       this.jogs.push(spin);
       c.add(holder);
 
-      // performance pads 4x2
+      // performance pads 4x2 (index 0..7 = top row left→right, then bottom row)
       for (let r = 0; r < 2; r++) {
         for (let k = 0; k < 4; k++) {
-          const col = new THREE.Color(PAD_COLORS[(k + r * 3 + (s > 0 ? 2 : 0)) % PAD_COLORS.length]);
-          const mat = m.ownEmissive(col, 0.9);
+          const col = new THREE.Color(PAD_COLORS[(k + r * 3 + (deck ? 2 : 0)) % PAD_COLORS.length]);
+          const mat = m.ownEmissive(col, 0.3);
           const pad = new THREE.Mesh(new THREE.BoxGeometry(0.037, 0.008, 0.028), mat);
           pad.position.set(x + (k - 1.5) * 0.043, 0.04, 0.083 + r * 0.037);
           pad.userData.dynamic = true;
-          this.pads.push({ mat, base: col.clone(), idx: this.pads.length });
+          this.pads.push({ mat, base: col.clone(), deck, idx: r * 4 + k });
           c.add(pad);
         }
       }
-      // transport buttons
-      c.add(at(cyl(0.012, 0.012, 0.008, m.plastic(0x2a2c33, 0.5), 14), x - 0.05, 0.04, 0.145));
-      c.add(at(cyl(0.012, 0.012, 0.008, m.plastic(0x2a2c33, 0.5), 14), x + 0.0, 0.04, 0.145));
-      c.add(at(cyl(0.012, 0.012, 0.008, m.emissive('btn', '#7a8cff', 0.8), 14), x + 0.05, 0.04, 0.145));
+      // transport buttons: cue · play · sync (own emissive materials so they can light)
+      const btnDefs: [string, number, string][] = [['cue', -0.05, '#ffb347'], ['play', 0, '#4be3a0'], ['sync', 0.05, '#7a8cff']];
+      for (const [name, dx, col] of btnDefs) {
+        const mat = m.ownEmissive(col, 0.12);
+        const b = new THREE.Mesh(new THREE.CylinderGeometry(0.012, 0.012, 0.008, 14), mat);
+        b.position.set(x + dx, 0.04, 0.145);
+        b.userData.dynamic = true;
+        this.btns[deck][name] = mat;
+        c.add(b);
+      }
     }
 
-    // mixer section
+    // ---- mixer section: per channel trim / hi / mid / low / filter, channel fader, VU
     c.add(at(box(0.135, 0.004, 0.31, m.plastic(0x1d1f25, 0.5), 1), 0, 0.037, 0));
     for (let ch = 0; ch < 2; ch++) {
       const x = (ch === 0 ? -1 : 1) * 0.03;
-      // EQ knobs
-      for (let k = 0; k < 3; k++) {
-        const knob = cyl(0.0085, 0.0085, 0.012, m.plastic(0x30323a, 0.4), 14);
-        at(knob, x, 0.045, -0.095 + k * 0.032);
-        c.add(knob);
-        c.add(at(box(0.002, 0.001, 0.007, m.emissive('knobmark', '#ffffff', 1), 1), x, 0.0515, -0.098 + k * 0.032));
-      }
-      // channel fader slot + cap
+      this.knob(m, c, ch, 'trim', x, -0.118, 0.0075, 0.6);
+      this.knob(m, c, ch, 'hi', x, -0.088);
+      this.knob(m, c, ch, 'mid', x, -0.058);
+      this.knob(m, c, ch, 'low', x, -0.028);
+      this.knob(m, c, ch, 'filter', x, 0.002, 0.008);
       c.add(at(box(0.008, 0.003, 0.09, m.rubber(), 1), x, 0.0395, 0.07));
       const cap = box(0.02, 0.012, 0.012, m.plastic(0x3b3d46, 0.4), 1);
-      at(cap, x, 0.047, 0.07);
+      at(cap, x, 0.047, 0.115 - 0.8 * 0.09);
       cap.userData.dynamic = true;
       c.add(cap);
       this.faders.push(cap);
-      // VU meter LEDs
       for (let i = 0; i < 8; i++) {
-        const mat = m.ownEmissive(i > 5 ? '#ff3b3b' : i > 3 ? '#ffc933' : '#33ff7a', 0.1);
+        const mat = m.ownEmissive(i > 5 ? '#ff3b3b' : i > 3 ? '#ffc933' : '#33ff7a', 0.05);
         const led = new THREE.Mesh(new THREE.BoxGeometry(0.008, 0.003, 0.006), mat);
         led.position.set(x + (ch === 0 ? 0.027 : -0.027), 0.0395, 0.1 - i * 0.0085);
         led.userData.dynamic = true;
@@ -248,50 +265,82 @@ export class DJBooth {
         c.add(led);
       }
     }
-    // crossfader
     c.add(at(box(0.09, 0.003, 0.009, m.rubber(), 1), 0, 0.0395, 0.147));
     this.crossfader = box(0.016, 0.012, 0.016, m.plastic(0x3b3d46, 0.4), 1);
     at(this.crossfader, 0, 0.047, 0.147);
     this.crossfader.userData.dynamic = true;
     c.add(this.crossfader);
-    // browse knob + load buttons
     c.add(at(cyl(0.014, 0.014, 0.012, m.steel(), 16), 0, 0.045, -0.13));
     for (const s of [-1, 1]) c.add(at(box(0.026, 0.006, 0.014, m.plastic(0x2a2c33, 0.5), 1), s * 0.075, 0.041, -0.135));
-    void rnd;
     return c;
   }
 
-  update(p: BoothParams): void {
-    const e = p.energy;
-    // jog wheels spin at ~33⅓ rpm scaled by tempo
-    const w = (33.3 / 60) * Math.PI * 2 * (p.bpm / 124) * (p.playing ? 1 : 0);
-    this.jogAngle[0] += p.dt * w;
-    this.jogAngle[1] += p.dt * w * 0.93;
-    this.jogs[0].rotation.y = -this.jogAngle[0];
-    this.jogs[1].rotation.y = -this.jogAngle[1];
+  /**
+   * Drive the board. With a mapped controller (`view.mapped`) every mapped control mirrors the real
+   * hardware; unmapped controls stay at rest. Nothing animates on its own without music.
+   */
+  update(p: BoothParams, view: BoardView | null): void {
+    const music = p.music;
+    const live = !!view?.mapped;
+    const pulse = Math.pow(1 - p.beatPhase, 3) * music;
 
-    const pulse = Math.pow(1 - p.beatPhase, 3);
-    this.pads.forEach((pad, i) => {
-      const lit = (Math.floor(p.beatInBar * 2 + p.beatPhase * 2) + i) % 8 === 0 ? 1.8 : 0;
-      pad.mat.color.copy(pad.base).multiplyScalar(0.25 + 0.5 * e + pulse * 0.8 * (i % 2 ? 1 : 0.4) + lit * 0.5 + p.drop * 1.5);
-    });
-    this.rings.forEach((r, i) => {
-      const a = p.accent;
-      r.color.copy(a).lerp(new THREE.Color(PAD_COLORS[i * 3]), 0.4).multiplyScalar(1.1 + e * 1.6 + pulse * 0.7);
-    });
-    // VU meters follow bass with fast attack, slow decay
-    for (const m of this.meters) {
-      const level = Math.min(1, p.bass * 1.1 + p.kick * 0.3) * (m.ch === 0 ? 1 : 0.92);
-      m.mat.color.set(m.level > 0.75 ? '#ff3b3b' : m.level > 0.5 ? '#ffc933' : '#33ff7a').multiplyScalar(level > m.level ? 1.6 : 0.06);
+    // ---------- jog wheels
+    const w = (33.3 / 60) * Math.PI * 2 * (p.bpm / 124);
+    for (let d = 0; d < 2; d++) {
+      const spinning = live && view!.playMapped[d] ? view!.playing[d] : music > 0.3;
+      this.spin[d] += p.dt * w * (spinning ? 1 : 0) * (d ? 0.93 : 1);
+      const scratch = live && view!.jogMapped[d] ? view!.jogAngle[d] : 0;
+      this.jogs[d].rotation.y = -(this.spin[d] + scratch);
     }
-    this.crossfader.position.x = Math.sin(p.time * 0.13) * 0.012;
-    this.faders[0].position.z = 0.07 - 0.015 * Math.sin(p.time * 0.17 + 1);
-    this.faders[1].position.z = 0.07 - 0.015 * Math.sin(p.time * 0.19);
-    this.underglow.color.copy(p.accent).multiplyScalar(0.8 + e * 1.6 + pulse * 0.6);
-    this.laptopScreen.color.set('#ffffff').lerp(p.accent, 0.25).multiplyScalar(0.28 + 0.18 * e + pulse * 0.06);
+
+    // ---------- pads
+    for (const pad of this.pads) {
+      const held = live && view!.pads[pad.deck][pad.idx];
+      const v = held ? 3.2 : 0.22 + pulse * 0.28 * (pad.idx % 2 ? 1 : 0.5) + p.drop * 0.6 * music;
+      pad.mat.color.copy(pad.base).multiplyScalar(v);
+    }
+
+    // ---------- jog rings + buttons
+    for (let d = 0; d < 2; d++) {
+      const spinning = live && view!.playMapped[d] ? view!.playing[d] : music > 0.3;
+      this.rings[d].color.copy(p.accent).lerp(new THREE.Color(PAD_COLORS[d * 3]), 0.4).multiplyScalar(0.25 + (spinning ? 0.6 + p.energy * 0.9 + pulse * 0.5 : 0));
+      const b = this.btns[d];
+      const playOn = live && view!.playMapped[d] ? view!.playing[d] : music > 0.3;
+      b.play.color.set('#4be3a0').multiplyScalar(playOn ? 2.2 : 0.12);
+      b.cue.color.set('#ffb347').multiplyScalar(live && view!.cue[d] ? 3 : 0.12);
+      b.sync.color.set('#7a8cff').multiplyScalar(live && view!.sync[d] ? 3 : 0.12);
+    }
+
+    // ---------- knobs, faders, crossfader (mirror hardware when known)
+    const setKnob = (deck: number, name: string, v: number | undefined, dflt: number) => {
+      const k = this.knobs[deck][name];
+      const val = live && v !== undefined ? v : dflt;
+      k.rotation.y = (val - 0.5) * Math.PI * 1.5;
+    };
+    for (let d = 0; d < 2; d++) {
+      setKnob(d, 'trim', view?.trim[d], 0.6);
+      setKnob(d, 'hi', view?.hi[d], 0.5);
+      setKnob(d, 'mid', view?.mid[d], 0.5);
+      setKnob(d, 'low', view?.low[d], 0.5);
+      setKnob(d, 'filter', view?.filter[d], 0.5);
+      const fv = live && view!.fader[d] !== undefined ? view!.fader[d]! : 0.8;
+      this.faders[d].position.z = 0.115 - fv * 0.09;
+    }
+    const xf = live && view!.crossfader !== undefined ? view!.crossfader : 0.5;
+    this.crossfader.position.x = (xf - 0.5) * 0.08;
+
+    // ---------- VU meters follow real bass, scaled by the channel fader when we know it
+    for (const m of this.meters) {
+      const fv = live && view!.fader[m.ch] !== undefined ? view!.fader[m.ch]! : 1;
+      const level = Math.min(1, (p.bass * 1.1 + p.kick * 0.3) * music * fv);
+      m.mat.color.set(m.level > 0.75 ? '#ff3b3b' : m.level > 0.5 ? '#ffc933' : '#33ff7a').multiplyScalar(level > m.level ? 1.6 : 0.05);
+    }
+
+    this.underglow.color.copy(p.accent).multiplyScalar(0.45 + music * (0.5 + p.energy * 1.1 + pulse * 0.4));
+    this.laptopScreen.color.set('#ffffff').lerp(p.accent, 0.25).multiplyScalar(0.1 + music * (0.2 + 0.12 * p.energy + pulse * 0.05));
     const flick = 1.6 + Math.sin(p.time * 9) * 0.35 + Math.sin(p.time * 23) * 0.2;
     this.candle.color.set('#ffad5c').multiplyScalar(flick);
-    this.controllerLight.intensity = 3.2 + e * 2.2 + p.drop * 3;
+    this.controllerLight.intensity = 6 + music * (p.energy * 2.5 + p.drop * 3);
     this.controllerLight.color.set('#ffb878').lerp(p.accent, 0.25);
   }
 }

@@ -29,10 +29,10 @@ interface Profile {
 }
 
 const PROFILES: Record<LightingModeId, Profile> = {
-  CALM: { head: 0.5, speed: 0.15, pulse: 0.1, strips: 0.45, wall: 0.4, ceiling: 1.0, lasers: 0, haze: 0.55, rim: 0.35, ambient: 1.0 },
-  HOUSE: { head: 0.72, speed: 0.5, pulse: 0.45, strips: 0.8, wall: 0.75, ceiling: 0.55, lasers: 0, haze: 0.9, rim: 0.7, ambient: 0.85 },
-  PEAK: { head: 1.0, speed: 0.9, pulse: 0.6, strips: 1.1, wall: 1.0, ceiling: 0.25, lasers: 0.7, haze: 1.2, rim: 1.0, ambient: 0.7 },
-  DROP: { head: 1.2, speed: 1.35, pulse: 0.7, strips: 1.4, wall: 1.2, ceiling: 0.08, lasers: 1, haze: 1.25, rim: 1.4, ambient: 0.6 },
+  CALM: { head: 0.5, speed: 0.15, pulse: 0.2, strips: 0.45, wall: 0.4, ceiling: 1.0, lasers: 0, haze: 0.55, rim: 0.35, ambient: 1.0 },
+  HOUSE: { head: 0.8, speed: 0.5, pulse: 0.85, strips: 0.8, wall: 0.75, ceiling: 0.55, lasers: 0, haze: 0.9, rim: 0.7, ambient: 0.85 },
+  PEAK: { head: 1.0, speed: 0.9, pulse: 0.95, strips: 1.1, wall: 1.0, ceiling: 0.25, lasers: 0.7, haze: 1.2, rim: 1.0, ambient: 0.7 },
+  DROP: { head: 1.2, speed: 1.35, pulse: 0.9, strips: 1.4, wall: 1.2, ceiling: 0.08, lasers: 1, haze: 1.25, rim: 1.4, ambient: 0.6 },
   BREAKDOWN: { head: 0.3, speed: 0.1, pulse: 0.08, strips: 0.35, wall: 0.35, ceiling: 0.9, lasers: 0, haze: 1.4, rim: 0.3, ambient: 1.1 },
   AFTERHOURS: { head: 0.46, speed: 0.22, pulse: 0.22, strips: 0.6, wall: 0.5, ceiling: 0.6, lasers: 0, haze: 1.0, rim: 0.5, ambient: 0.9 },
 };
@@ -70,6 +70,12 @@ const PATTERNS: Record<string, Pattern> = {
     const x = lerp(b.x0, b.x1, n > 1 ? i / (n - 1) : 0.5) * 0.8;
     out.set(x + Math.sin(t * s + i) * 2, b.wallY * (0.6 + 0.4 * Math.sin(t * s * 0.7 + i)), b.wallZ);
   },
+  sync: (i, n, t, s, side, beat, out, pos, b) => {
+    // phase-locked to the bar: every head sweeps in unison, one full pass per 8 beats
+    const cx = (b.x0 + b.x1) / 2, ax = (b.x1 - b.x0) * 0.42;
+    const u = n > 1 ? i / (n - 1) - 0.5 : 0;
+    out.set(cx + ax * Math.sin((beat / 8) * Math.PI * 2 + u * 2.4), 0.6, b.z0 + (b.z1 - b.z0) * (0.5 + 0.5 * Math.sin((beat / 4) * Math.PI * 2 + i * 0.5)));
+  },
   snap: (i, n, t, s, side, beat, out, pos, b) => {
     const k = (Math.floor(beat) + i) % Math.max(2, n);
     const x = lerp(b.x0, b.x1, k / Math.max(1, n - 1)) * 0.85;
@@ -79,8 +85,8 @@ const PATTERNS: Record<string, Pattern> = {
 
 const MODE_PATTERNS: Record<LightingModeId, string[]> = {
   CALM: ['pool', 'sweep'],
-  HOUSE: ['sweep', 'cross', 'scan', 'snap'],
-  PEAK: ['fan', 'cross', 'snap', 'scan', 'sweep'],
+  HOUSE: ['sync', 'cross', 'scan', 'snap', 'sync'],
+  PEAK: ['fan', 'sync', 'snap', 'scan', 'cross'],
   DROP: ['fan', 'wall', 'cross'],
   BREAKDOWN: ['pool', 'wall'],
   AFTERHOURS: ['pool', 'sweep'],
@@ -220,6 +226,9 @@ export class LightingManager {
   private lasers: LaserUnit[] = [];
   private strobes: StrobeUnit[] = [];
   private pars: ParUnit[] = [];
+  private washes: { quad: THREE.Mesh; glow: THREE.Sprite; order: number }[] = [];
+  private blinders: THREE.Sprite[] = [];
+  private blinder = 0;
   private ceilingLamps: { mat: THREE.MeshBasicMaterial; glow: THREE.Sprite; base: number }[] = [];
   private strips: LedStrip[] = [];
   private walls: LedWall[] = [];
@@ -239,7 +248,7 @@ export class LightingManager {
   private strobeBurst = 0;
   private flash = 0;
   private time = 0;
-  private rnd = mulberry32(99);
+  private rnd = mulberry32(((Date.now() & 0xffff) | 1) + 7);
   private quality!: QualityProfile;
   private hazeLevel = 0.5;
   /** Average light colour — used by haze + LED walls. */
@@ -247,6 +256,7 @@ export class LightingManager {
   readonly secondColor = new THREE.Color('#7b4dff');
   activeCount = 0;
   private lastDropT = -99;
+  private lastBlinderT = -9;
   private tmpV = new THREE.Vector3();
   private tmpV2 = new THREE.Vector3();
   private tmpC = new THREE.Color();
@@ -355,6 +365,32 @@ export class LightingManager {
       this.strobes.push({ mat, mesh });
     }
 
+    // blinders: warm glow at each strobe position, flashed on accents (rate-limited, never constant)
+    for (const st of this.strobes) {
+      const sp = glowSprite(this.glowTex, '#ffe2b0', 3.2);
+      sp.position.copy(st.mesh.position).add(new THREE.Vector3(0, -0.2, 0.3));
+      (sp.material as THREE.SpriteMaterial).opacity = 0;
+      this.group.add(sp);
+      this.blinders.push(sp);
+    }
+
+    // wall washers: coloured light spilling up the side walls
+    const washSpecs = ctx.fixtures.filter((f) => f.kind === 'wash');
+    washSpecs.forEach((spec, i) => {
+      const quad = new THREE.Mesh(
+        new THREE.PlaneGeometry(6, spec.size ?? 8),
+        new THREE.MeshBasicMaterial({ map: this.glowTex, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, fog: false, opacity: 0.4 }),
+      );
+      quad.position.set(spec.pos[0], spec.pos[1] + (spec.size ?? 8) * 0.35, spec.pos[2]);
+      quad.rotation.y = spec.side && spec.side < 0 ? Math.PI / 2 : -Math.PI / 2;
+      quad.renderOrder = 2;
+      this.group.add(quad);
+      const glow = glowSprite(this.glowTex, '#ffffff', 1.6);
+      glow.position.set(spec.pos[0] + (spec.side && spec.side < 0 ? 0.25 : -0.25), spec.pos[1] + 0.1, spec.pos[2]);
+      this.group.add(glow);
+      this.washes.push({ quad, glow, order: i / Math.max(1, washSpecs.length - 1) });
+    });
+
     // par / back lights
     for (const spec of ctx.fixtures.filter((f) => f.kind === 'par' || f.kind === 'back')) {
       const glow = glowSprite(this.glowTex, '#ffffff', spec.kind === 'back' ? 1.8 : 1.1);
@@ -400,7 +436,7 @@ export class LightingManager {
   dispose(): void {
     for (const h of this.heads) { h.beam.material.dispose(); }
     this.group.clear();
-    this.heads = []; this.lasers = []; this.strobes = []; this.pars = []; this.ceilingLamps = [];
+    this.washes = []; this.blinders = []; this.heads = []; this.lasers = []; this.strobes = []; this.pars = []; this.ceilingLamps = [];
     this.realLights = [];
     this.rim = null;
     this.fill = null;
@@ -415,6 +451,7 @@ export class LightingManager {
   /** Resolve the visual mode from the crowd state (or an override). */
   private pickMode(f: CrowdFrame, s: Readonly<Settings>): LightingModeId {
     if (s.lightingMode !== 'AUTO') return s.lightingMode;
+    if (f.musicActive < 0.25) return 'CALM'; // no music: the room idles
     switch (f.state) {
       case 'CALM': return new Date().getHours() >= 3 && new Date().getHours() < 7 ? 'AFTERHOURS' : 'CALM';
       case 'GROOVE': case 'RECOVERY': case 'ENERGY_BUILD': return 'HOUSE';
@@ -461,9 +498,10 @@ export class LightingManager {
     }
 
     const intensityScale = (s.lightingIntensity / 100) * clamp(0.7 + f.lightingIntensity * 0.5, 0.5, 1.3);
-    const pulse = Math.pow(clamp(1 - f.beatPhase), 2.5);
+    const mus = clamp(f.musicActive * 1.4);
+    const pulse = Math.pow(clamp(1 - f.beatPhase), 2.5) * mus;
     const kick = f.kick;
-    const bassLift = 1 + p.pulse * (kick * 0.8 + f.bassEnergy * 0.4);
+    const bassLift = 1 + p.pulse * kick * 0.6 * mus;
     this.flash = damp(this.flash, 0, 7, dt);
     const buildBoost = 1 + f.buildIntensity * 0.5;
 
@@ -496,7 +534,7 @@ export class LightingManager {
 
       // intensity: base * beat pulse, plus accent on strong beats
       const stagger = 0.65 + 0.35 * Math.sin(time * 0.7 + h.index * 1.7);
-      const inten = clamp(p.head * intensityScale * bassLift * buildBoost * (0.78 + 0.22 * pulse) * (mode === 'CALM' || mode === 'BREAKDOWN' ? stagger : 1) + this.flash * 0.6, 0, 3);
+      const inten = clamp(p.head * intensityScale * bassLift * buildBoost * (1 - p.pulse * 0.55 * (1 - pulse)) * (mode === 'CALM' || mode === 'BREAKDOWN' ? stagger : 1) + this.flash * 0.6, 0, 3);
 
       // length: distance to the floor along the beam (or far)
       let len = 38;
@@ -574,6 +612,24 @@ export class LightingManager {
       if (time < this.strobeUntil) strobeLevel = 3.2;
     }
     for (const st of this.strobes) st.mat.color.set('#eaf2ff').multiplyScalar(strobeLevel);
+
+    // ---------------- blinders: accent on every other beat in PEAK / DROP
+    if (!s.reduceFlashing && (mode === 'PEAK' || mode === 'DROP') && f.events.beat && f.beatInBar % 2 === 0 && time - this.lastBlinderT > 0.45) {
+      this.blinder = mode === 'DROP' ? 1 : 0.7;
+      this.lastBlinderT = time;
+    }
+    this.blinder *= Math.exp(-dt / 0.1);
+    for (const b of this.blinders) (b.material as THREE.SpriteMaterial).opacity = clamp(this.blinder);
+
+    // ---------------- wall washers (colour follows the palette, pulse follows the beat)
+    this.washes.forEach((w, i) => {
+      const c = pal[(i + this.lastPhrase) % pal.length];
+      const v = (0.1 + p.rim * 0.35 + pulse * p.pulse * 0.5 + f.dropIntensity * 0.5) * intensityScale * (0.6 + 0.4 * mus);
+      const m = w.quad.material as THREE.MeshBasicMaterial;
+      m.color.copy(c);
+      m.opacity = clamp(v, 0, 0.9);
+      (w.glow.material as THREE.SpriteMaterial).color.copy(c).multiplyScalar(0.8 + v);
+    });
 
     // ---------------- ceiling / warm lamps
     for (const cl of this.ceilingLamps) {

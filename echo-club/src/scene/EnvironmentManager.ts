@@ -11,6 +11,7 @@ import { batchStatic } from './StaticBatch';
 import { VENUES } from './venues/venues';
 import type { VenueBuild } from './venues/VenueTypes';
 import type { SceneManager } from './SceneManager';
+import type { BoardView } from '../audio/MidiEngine';
 import type { CrowdRegion } from '../crowd/CrowdLayout';
 import { FloorReflection } from './FloorReflection';
 
@@ -112,13 +113,13 @@ export class EnvironmentManager {
     this.ctx?.ledWalls.forEach((w) => w.material.dispose());
   }
 
-  update(f: CrowdFrame, s: Readonly<Settings>, dt: number, time: number, playing: boolean): void {
+  update(f: CrowdFrame, s: Readonly<Settings>, dt: number, time: number, board: BoardView | null): void {
     if (!this.venue || !this.booth) return;
     this.lighting.update(f, s, dt, time);
     this.booth.update({
       time, dt, bpm: f.bpm, energy: f.crowdEnergy / 100, kick: f.kick, bass: f.bassEnergy, beatPhase: f.beatPhase,
-      beatInBar: f.beatInBar, playing, drop: f.dropIntensity, build: f.buildIntensity, accent: this.lighting.avgColor,
-    });
+      beatInBar: f.beatInBar, music: f.musicActive, drop: f.dropIntensity, build: f.buildIntensity, accent: this.lighting.avgColor,
+    }, board);
     this.haze.update(time, this.lighting.avgColor, s.fogAmount / 100 * (this.venue.hazeScale ?? 1), f.crowdEnergy / 100, f.dropIntensity);
     this.venue.tick?.(time, f.crowdEnergy / 100);
     this.reflection?.setStrength(0.42 + 0.35 * (f.crowdEnergy / 100) + 0.3 * f.dropIntensity);

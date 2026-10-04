@@ -79,6 +79,8 @@ export interface CrowdFrame {
   beatInBar: number;
   /** Beat counter that increments on every beat-clock tick. */
   beatCount: number;
+  /** 0..1 — is there music right now? Everything rhythmic is gated by this. */
+  musicActive: number;
   events: MusicEvents;
   /** Number of milliseconds-scale kick envelope 0..1 (decays fast after each beat). */
   kick: number;

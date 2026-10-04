@@ -9,6 +9,12 @@ export interface Settings {
   midiDeviceId: string;
   /** Headset-mic backup listener that runs alongside the main input. */
   backupMic: boolean;
+  /** Noise gate for mic inputs, dBFS of the raw mic level. */
+  micGateDb: number;
+  /** Nudge the beat grid (ms): + delays visuals, − advances them. */
+  beatOffsetMs: number;
+  /** Read the DJ controller alongside any audio input. */
+  midiLayer: boolean;
   backupMicDeviceId: string;
   /** Manual / fallback BPM. 0 = auto-detect when audio is live. */
   bpm: number;
@@ -41,6 +47,9 @@ export const DEFAULT_SETTINGS: Settings = {
   audioDeviceId: '',
   midiDeviceId: '',
   backupMic: false,
+  micGateDb: -50,
+  beatOffsetMs: 0,
+  midiLayer: true,
   backupMicDeviceId: '',
   bpm: 124,
   sensitivity: 55,

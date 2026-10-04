@@ -14,7 +14,8 @@ export type FixtureKind =
   | 'par'
   | 'back'
   | 'wash'
-  | 'ceiling';
+  | 'ceiling'
+  | 'wash';
 
 export interface FixtureSpec {
   kind: FixtureKind;

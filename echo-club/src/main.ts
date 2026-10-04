@@ -93,6 +93,8 @@ class ClubApp {
       fullscreen: () => this.toggleFullscreen(),
       endSession: () => this.endSession(),
       listDevices: () => this.audio.listDevices(),
+      calibrate: () => this.calibrateGate(),
+      midiAttach: () => this.syncMidiLayer(true),
     }, this.audio, this.midi);
 
     this.session.onReaction = (r) => this.ui.reaction(r.score, r.label);
@@ -124,6 +126,8 @@ class ClubApp {
     if (s.autoFullscreen) void this.requestFullscreen();
     const res = await this.connectAudio(file);
     if (s.backupMic) await this.syncBackup();
+    this.applyGate();
+    void this.syncMidiLayer();
     if (!res.ok && s.audioInput !== 'manual' && !(s.backupMic && this.backup.isLive)) {
       // Do not trap the user: tell them why and let them pick something else, or continue manually.
       if (document.fullscreenElement) void document.exitFullscreen().catch(() => undefined);
@@ -180,6 +184,35 @@ class ClubApp {
       if (s.audioInput === 'manual') this.ui.notice('Manual mode — tap T to set the beat.', false, 4500);
     }
     return res;
+  }
+
+  private applyGate(): void {
+    const s = this.settings.get();
+    this.audio.setGate(s.audioInput === 'mic' ? s.micGateDb : -62);
+    this.backup.setGate(s.micGateDb);
+  }
+
+  /** Measure the room (music paused!) and put the noise gate just above it. */
+  private async calibrateGate(): Promise<string> {
+    const useBackupMic = !(this.audio.isLive && (this.settings.get().audioInput === 'mic' || this.settings.get().audioInput === 'line')) && this.backup.isLive;
+    const engine = useBackupMic ? this.backup : this.audio;
+    if (!engine.isLive) return 'Connect a microphone input first (or enable the headset mic backup).';
+    const r = await engine.calibrate(2500);
+    if (!r) return 'Could not measure the room.';
+    this.settings.set({ micGateDb: Math.round(r.gateDb) });
+    this.applyGate();
+    return `Room noise ${r.ambientDb.toFixed(0)} dB → gate set to ${r.gateDb.toFixed(0)} dB. Music louder than that counts.`;
+  }
+
+  /** Attach the DJ controller as a layer next to whatever audio input is chosen. */
+  private async syncMidiLayer(announce = false): Promise<void> {
+    const s = this.settings.get();
+    if (s.audioInput === 'midi') return; // primary path handles it
+    if (!s.midiLayer) { this.midi.disconnect(); return; }
+    if (!MidiEngine.supported()) { if (announce) this.ui.notice('This browser has no Web MIDI — use Chrome or Edge.', true); return; }
+    const r = await this.midi.connect(s.midiDeviceId || undefined);
+    this.ui.setMidiStatus(r.ok, r.ok ? `Controller: ${this.midi.deviceName}` : r.message);
+    if (announce || !r.ok) this.ui.notice(r.ok ? `Controller connected: ${this.midi.deviceName}` : r.message, !r.ok, 5000);
   }
 
   /** (Re)start or stop the headset-mic backup listener to match the settings. */
@@ -283,6 +316,8 @@ class ClubApp {
     if (changed.includes('handsUpSensitivity') || changed.includes('phoneFrequency')) this.crowd.applySettings(s);
     if (changed.includes('beatSensitivity')) this.audio.setBeatSensitivity(s.beatSensitivity / 100);
     if (changed.includes('debug')) this.debug.enabled = s.debug;
+    if (changed.includes('micGateDb')) this.applyGate();
+    if ((changed.includes('midiLayer') || changed.includes('midiDeviceId')) && this.running) void this.syncMidiLayer(true);
     if ((changed.includes('backupMic') || changed.includes('backupMicDeviceId')) && this.running) void this.syncBackup();
     if (changed.includes('autoQuality')) this.perf.autoEnabled = s.autoQuality;
     if (changed.includes('bpm') && s.audioInput === 'manual') this.energy.clock.clearTap();
@@ -359,19 +394,18 @@ class ClubApp {
     if (this.running && this.simRunning) {
       const dt = Math.min(this.maxDt, rawDt);
       this.simTime += dt;
-      const midiOn = this.midi.connected && s.audioInput === 'midi';
+      const midiPrimary = this.midi.connected && s.audioInput === 'midi';
       const bk = this.backup.isLive ? this.backup.update(real) : null;
+      this.midi.step(dt);
       let features;
       let live: boolean;
       let useBackup = false;
-      if (midiOn) {
+      let midiOn = false; // true when the controller itself is the music source
+      if (midiPrimary) {
         features = this.midi.features(dt, this.energy.clock.bpm, this.energy.clock.tick, this.energy.clock.beatInBar);
-        const h = this.midi.consumeHits();
-        if (h > 0) this.energy.bump(Math.min(h, 3));
-        live = true;
+        live = true; midiOn = true;
         if (!this.midi.hasActivity && this.midi.idleSeconds > 5 && bk?.signal) {
-          // controller is silent (probably owned by Serato): hear the music instead
-          features = bk; useBackup = true;
+          features = bk; useBackup = true; midiOn = false; // controller silent (Serato owns it?): hear the music instead
         } else if (bk && bk.signal && bk.bpmConfidence > 0.4) {
           // controller gives the mood, the mic gives the tempo + beat grid
           features = { ...features, beat: bk.beat, strongBeat: bk.strongBeat, beatInBar: bk.beatInBar, bpm: bk.bpm, bpmConfidence: bk.bpmConfidence };
@@ -380,6 +414,25 @@ class ClubApp {
         features = this.audio.update(real);
         live = this.audio.isLive;
         if (!(live && features.signal) && bk?.signal) { features = bk; live = true; useBackup = true; }
+        if (this.midi.connected && this.midi.canVeto) {
+          if (!live) {
+            // no audio at all: the controller's faders / EQ / play buttons drive the room
+            features = this.midi.features(dt, this.energy.clock.bpm, this.energy.clock.tick, this.energy.clock.beatInBar);
+            live = true; midiOn = true;
+          } else if (this.midi.mixLevel() < 0.04) {
+            // the mixer is silent — whatever the mic hears is just the room
+            features = { ...features, signal: false };
+          }
+        }
+      }
+      if (this.midi.connected) {
+        const hits = this.midi.consumeHits();
+        if (hits > 0) this.energy.bump(Math.min(hits, 3));
+        const act = this.midi.consumeActivity();
+        if (act > 0.02) this.energy.bump(Math.min(act * 0.55, 2.2)); // working the crossfader / filter / EQ hypes the room
+        for (const a of this.midi.consumeActions()) {
+          if (a === 'tap') this.tap(); else if (a === 'build') this.triggerBuild(); else if (a === 'drop') this.triggerDrop();
+        }
       }
       this.backupUsed = useBackup;
       this.frame = this.energy.update(dt, this.simTime, features, live, s);
@@ -389,7 +442,7 @@ class ClubApp {
       if (this.debug.logging) this.recordEvents(f);
       this.session.update(f);
       this.crowd.update(f, dt, this.simTime);
-      this.env.update(f, s, dt, this.simTime, true);
+      this.env.update(f, s, dt, this.simTime, this.midi.connected ? this.midi.view() : null);
       this.camera.update(f, s.cameraMovement / 100, this.simTime, dt);
       this.beatFlash = f.events.beat;
 
@@ -399,10 +452,12 @@ class ClubApp {
       this.scene.setGrade(real, f.dropIntensity * 0.0035, 0.5);
 
       this.ui.updateHud(f, {
-        input: this.backupUsed ? 'BACKUP MIC' : midiOn ? 'CONTROLLER' : live ? this.audio.label.toUpperCase() : s.audioInput === 'manual' ? 'MANUAL' : 'NO SIGNAL',
+        input: this.backupUsed ? 'BACKUP MIC' : midiPrimary || midiOn ? 'CONTROLLER' : live ? this.audio.label.toUpperCase() : s.audioInput === 'manual' ? 'MANUAL' : 'NO SIGNAL',
         live, manual: !live, people: this.crowd.count, attendance: this.session.stats.attendance, stateLabel: STATE_LABEL[f.state],
       }, real);
       this.ui.updateSession(this.session.stats);
+      const micEng = this.audio.isLive && (s.audioInput === 'mic' || s.audioInput === 'line') ? this.audio : this.backup.isLive ? this.backup : null;
+      if (micEng) this.ui.setMicMeter(micEng.rawDb, s.micGateDb);
     } else if (!this.running) {
       // behind the launcher: slow idle camera so the venue is alive (ambient mode)
       const dt = Math.min(this.maxDt, rawDt);
@@ -410,7 +465,7 @@ class ClubApp {
       const f = this.energy.update(dt, this.simTime, this.audio.features, false, { ...s, crowdEnergy: -20 });
       this.frame = f;
       this.crowd.update(f, dt, this.simTime);
-      this.env.update(f, s, dt, this.simTime, true);
+      this.env.update(f, s, dt, this.simTime, null);
       this.camera.update(f, s.cameraMovement / 100, this.simTime, dt);
       this.scene.setBloom(0.5, 0.82, 0.65);
       this.scene.setGrade(real, 0, 0.5);
